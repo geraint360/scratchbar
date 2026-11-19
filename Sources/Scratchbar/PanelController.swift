@@ -27,6 +27,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     var anchorFrame: () -> NSRect? = { nil }
     /// Called whenever the window hides.
     var didHide: () -> Void = {}
+    /// Called just before the window shows.
+    var willShow: () -> Void = {}
 
     private var lastAutoHide = Date.distantPast
     private var isPositioning = false
@@ -83,6 +85,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func show(newPage: Bool) {
+        willShow()
         content.prepareForShow(newPage: newPage)
         position()
         // A non-activating panel takes keyboard focus without making Scratchbar

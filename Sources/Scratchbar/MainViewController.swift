@@ -30,6 +30,15 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
     var onSaved: (String, String) -> Void = { _, _ in }
     /// Called just before a page is deleted, with its id and text.
     var willDelete: (String, String) -> Void = { _, _ in }
+    /// Takes a backup (used around sync conflicts and remote deletes).
+    var backup: (String, String, BackupReason) -> Void = { _, _, _ in }
+    /// Marks iCloud conflict versions of a page as resolved.
+    var resolveVersionConflicts: (String) -> Void = { _ in }
+
+    /// The text last read from or written to disk for the current page.
+    private var lastSavedText = ""
+    private var bannerKind: BannerKind?
+    private enum BannerKind { case edited(other: String), deleted }
 
     init(store: PageStoring) {
         self.store = store
@@ -202,17 +211,23 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
     }
 
     private func load(id: String) {
+        clearBanner()
         currentID = id
         UserDefaults.standard.set(id, forKey: DefaultsKey.lastPageID)
         if scheduler.knownOnDisk.contains(id) {
             do {
-                setEditorText(try store.read(id), editable: true)
+                let text = try store.read(id)
+                lastSavedText = text
+                setEditorText(text, editable: !(pages.first { $0.id == id }?.isDownloading ?? false))
+            } catch where pages.first(where: { $0.id == id })?.isDownloading == true {
+                setEditorText("Downloading from iCloud…", editable: false)
             } catch {
                 // Never show an editable blank page for a file we failed to read:
                 // typing would overwrite it.
                 setEditorText("Couldn't open this page:\n\(error.localizedDescription)", editable: false)
             }
         } else {
+            lastSavedText = ""
             setEditorText("", editable: true)  // new page, not on disk yet
         }
         list.show(pages, selectedID: id)
@@ -301,12 +316,129 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
     }
 
     private func save(id: String, text: String) {
+        if id == currentID, bannerKind == nil, scheduler.knownOnDisk.contains(id) {
+            let disk = try? store.read(id)
+            if saveWouldOverwriteRemoteChange(diskText: disk, lastSavedText: lastSavedText, newText: text), let disk {
+                showEditedBanner(id: id, other: disk)
+                return
+            }
+        }
         do {
             try store.write(id, text: text)
+            if id == currentID { lastSavedText = text }
             onSaved(id, text)
         } catch {
             NSLog("Scratchbar: failed to save page \(id): \(error)")
         }
+    }
+
+    // MARK: - Changes from elsewhere (iCloud, Finder, other editors)
+
+    /// `conflictTexts` holds the other Mac's text for pages with iCloud conflicts.
+    func handleRemote(_ events: [RemoteEvent], conflictTexts: [String: String]) {
+        var actions: [RemoteAction] = []
+        var otherText: String?
+        for event in events {
+            if event.id == currentID, case .modified = event {
+                // Our own saves show up here too: ignore anything we already have.
+                let disk = (try? store.read(event.id)) ?? ""
+                if disk == textView.string || disk == lastSavedText { continue }
+                otherText = disk
+            }
+            if case .conflict(let id) = event, id == currentID { otherText = conflictTexts[id] }
+            let dirty = scheduler.hasPendingChanges || textView.string != lastSavedText
+            actions += decide(event, openPageID: currentID, editorDirty: dirty)
+        }
+        guard !actions.isEmpty else { return }
+        if actions.contains(.reloadList) { reloadList() }
+        guard let id = currentID else { return }
+        if actions.contains(.showDeletedBanner) {
+            showDeletedBanner(id: id)
+        } else if actions.contains(.showEditedBanner), let otherText {
+            showEditedBanner(id: id, other: otherText)
+        } else if actions.contains(.reloadOpenPage), bannerKind == nil {
+            let selection = textView.selectedRange()
+            load(id: id)
+            if NSMaxRange(selection) <= (textView.string as NSString).length { textView.setSelectedRange(selection) }
+        }
+    }
+
+    private func clearBanner() {
+        bannerStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        bannerKind = nil
+    }
+
+    private func showBanner(_ banner: BannerView, kind: BannerKind) {
+        clearBanner()
+        bannerKind = kind
+        bannerStack.addArrangedSubview(banner)
+        banner.widthAnchor.constraint(equalTo: bannerStack.widthAnchor).isActive = true
+        // Freeze the editor until you choose, so nothing overwrites either version.
+        textView.isEditable = false
+    }
+
+    private func showEditedBanner(id: String, other: String) {
+        scheduler.cancel(id: id)
+        let banner = BannerView(message: "Edited on another Mac", buttons: [
+            ("Keep This Mac's", { [weak self] in self?.resolveEdited(id: id, other: other, choice: .keepThisMac) }),
+            ("Keep Other", { [weak self] in self?.resolveEdited(id: id, other: other, choice: .keepOther) }),
+            ("Keep Both", { [weak self] in self?.resolveEdited(id: id, other: other, choice: .keepBoth) }),
+        ])
+        showBanner(banner, kind: .edited(other: other))
+    }
+
+    private func resolveEdited(id: String, other: String, choice: ConflictChoice) {
+        guard id == currentID else { return clearBanner() }
+        let current = textView.string
+        backup(id, current, .beforeConflict)
+        backup(id, other, .beforeConflict)
+        let result = resolveConflict(current: current, other: other, choice: choice)
+        do {
+            try store.write(id, text: result)
+        } catch {
+            NSLog("Scratchbar: couldn't save resolved page \(id): \(error)")
+            return
+        }
+        resolveVersionConflicts(id)
+        lastSavedText = result
+        clearBanner()
+        if textView.string != result { setEditorText(result, editable: true) } else { textView.isEditable = true }
+        reloadList()
+        focusEditor()
+    }
+
+    private func showDeletedBanner(id: String) {
+        scheduler.cancel(id: id)
+        let text = textView.string
+        backup(id, text, .remoteDelete)
+        scheduler.knownOnDisk.remove(id)
+        let banner = BannerView(message: "Deleted on another Mac", buttons: [
+            ("Restore", { [weak self] in self?.restoreRemotelyDeleted(id: id, text: text) }),
+            ("Close", { [weak self] in self?.closeRemotelyDeleted(id: id) }),
+        ])
+        showBanner(banner, kind: .deleted)
+    }
+
+    private func restoreRemotelyDeleted(id: String, text: String) {
+        do {
+            try store.write(id, text: text)
+        } catch {
+            NSLog("Scratchbar: couldn't restore page \(id): \(error)")
+            return
+        }
+        scheduler.knownOnDisk.insert(id)
+        lastSavedText = text
+        clearBanner()
+        textView.isEditable = true
+        reloadList()
+        focusEditor()
+    }
+
+    private func closeRemotelyDeleted(id: String) {
+        clearBanner()
+        pages.removeAll { $0.id == id }
+        currentID = nil
+        showAfterRemoval()
     }
 
     // MARK: - Editing

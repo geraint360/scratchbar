@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let locations = StorageLocations(appSupport: AppDelegate.appSupport, iCloudRoot: StorageLocations.defaultICloudRoot)
     private(set) var repository: PageRepository!
     private var retryTimer: Timer?
+    private var watcher: FolderWatcher?
 
     static var appSupport: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -27,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             backups.backupIfDue(id: id, text: text)
             refreshSyncStatus()
         }
+        main.backup = { [unowned self] id, text, reason in backups.backup(id: id, text: text, reason: reason) }
+        main.resolveVersionConflicts = { [unowned self] id in resolveVersionConflicts(id: id) }
         main.willDelete = { [unowned self] id, text in
             backups.backup(id: id, text: text, reason: .beforeDelete)
             backups.markDeleted(id: id)
@@ -38,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemController.menuProvider = { [unowned self] in SettingsMenu.build(target: self) }
         statusItemController.onLeftClick = { [unowned self] in panelController.toggle() }
         panelController.didHide = { [unowned self] in backupCurrentPage() }
+        panelController.willShow = { [unowned self] in watcher?.scheduleScan() }
         panelController.anchorFrame = { [unowned self] in statusItemController.buttonScreenFrame }
 
         NSApp.mainMenu = buildMainMenu()
@@ -48,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(didWake(_:)), name: NSWorkspace.didWakeNotification, object: nil)
         retryPendingSync()
+        startWatching()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -89,6 +94,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.store = repository
         main.resetForStorageChange()
         retryPendingSync()
+        startWatching()
+    }
+
+    /// Watches the active pages folder for changes from iCloud, Finder or other editors.
+    private func startWatching() {
+        watcher?.stop()
+        watcher = nil
+        let folder = repository.primaryFolder
+        if repository.syncEnabled && !locations.iCloudAvailable { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: !repository.syncEnabled)
+        watcher = FolderWatcher(folder: folder) { [weak self] events in self?.handleFolderEvents(events) }
+    }
+
+    private func handleFolderEvents(_ events: [RemoteEvent]) {
+        guard let folder = watcher?.folder else { return }
+        var conflictTexts: [String: String] = [:]
+        let checked: [RemoteEvent] = events.map { event in
+            guard case .modified(let id) = event else { return event }
+            let url = folder.appendingPathComponent(id).appendingPathExtension("txt")
+            let conflicts = NSFileVersion.unresolvedConflictVersionsOfItem(at: url) ?? []
+            guard let newest = conflicts.max(by: { ($0.modificationDate ?? .distantPast) < ($1.modificationDate ?? .distantPast) }),
+                  let data = try? Data(contentsOf: newest.url) else { return event }
+            conflictTexts[id] = decodeText(data)
+            return .conflict(id: id)
+        }
+        main.handleRemote(checked, conflictTexts: conflictTexts)
+    }
+
+    private func resolveVersionConflicts(id: String) {
+        let url = repository.primaryFolder.appendingPathComponent(id).appendingPathExtension("txt")
+        for version in NSFileVersion.unresolvedConflictVersionsOfItem(at: url) ?? [] {
+            version.isResolved = true
+        }
+        try? NSFileVersion.removeOtherVersionsOfItem(at: url)
     }
 
     /// Moves pages saved locally (because iCloud failed) into iCloud Drive.

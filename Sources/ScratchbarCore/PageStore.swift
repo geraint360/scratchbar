@@ -46,18 +46,25 @@ public final class PageStore: PageStoring {
     public func list() throws -> [Page] {
         let fm = FileManager.default
         guard fm.fileExists(atPath: folder.path) else { return [] }
-        let urls = try fm.contentsOfDirectory(
-            at: folder, includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles])
-        let pages: [Page] = urls.compactMap { url in
-            guard url.pathExtension == PageKind.text.rawValue else { return nil }
+        let urls = try fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])
+        var pages: [Page] = []
+        var placeholders: [Page] = []
+        for url in urls {
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
                 .contentModificationDate ?? .distantPast
-            return Page(id: url.deletingPathExtension().lastPathComponent,
-                        modified: modified,
-                        title: pageTitle(for: readTitlePrefix(url)),
-                        location: location)
+            let name = url.lastPathComponent
+            if let id = placeholderID(fileName: name) {
+                // iCloud hasn't downloaded this page yet: ask for it.
+                try? fm.startDownloadingUbiquitousItem(at: self.url(for: id))
+                placeholders.append(Page(id: id, modified: modified, title: "Downloading…",
+                                         location: location, isDownloading: true))
+            } else if !name.hasPrefix("."), url.pathExtension == PageKind.text.rawValue {
+                pages.append(Page(id: url.deletingPathExtension().lastPathComponent, modified: modified,
+                                  title: pageTitle(for: readTitlePrefix(url)), location: location))
+            }
         }
+        let real = Set(pages.map(\.id))
+        pages += placeholders.filter { !real.contains($0.id) }
         return pages.sorted { $0.modified > $1.modified }
     }
 

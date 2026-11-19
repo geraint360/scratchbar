@@ -21,12 +21,16 @@ public struct Page: Equatable, Sendable {
     public var modified: Date
     public var title: String
     public var location: PageLocation
+    /// An iCloud placeholder whose contents haven't downloaded yet.
+    public var isDownloading: Bool
 
-    public init(id: String, kind: PageKind = .text, modified: Date, title: String, location: PageLocation = .primary) {
+    public init(id: String, kind: PageKind = .text, modified: Date, title: String,
+                location: PageLocation = .primary, isDownloading: Bool = false) {
         self.id = id
         self.kind = kind
         self.modified = modified
         self.title = title
         self.location = location
+        self.isDownloading = isDownloading
     }
 }
