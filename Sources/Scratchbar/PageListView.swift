@@ -3,7 +3,7 @@ import ScratchbarCore
 
 /// The sidebar list of page titles. Each row shows an ✕ (delete) when it is
 /// selected or under the pointer, like BBEdit's open-documents list.
-final class PageListView: NSScrollView, NSTableViewDataSource, NSTableViewDelegate {
+final class PageListView: NSScrollView, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
     private let table = NSTableView()
     private(set) var pages: [Page] = []
     private var suppressSelectionCallback = false
@@ -12,6 +12,8 @@ final class PageListView: NSScrollView, NSTableViewDataSource, NSTableViewDelega
     var onSelect: ((String) -> Void)?
     /// Called when the user clicks a row's ✕.
     var onDelete: ((String) -> Void)?
+    /// The right-click menu's items for a page.
+    var menuItems: ((String) -> [NSMenuItem])?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -29,6 +31,9 @@ final class PageListView: NSScrollView, NSTableViewDataSource, NSTableViewDelega
         table.allowsEmptySelection = true
         table.dataSource = self
         table.delegate = self
+        let menu = NSMenu()
+        menu.delegate = self
+        table.menu = menu
         documentView = table
         hasVerticalScroller = true
         autohidesScrollers = true
@@ -57,6 +62,20 @@ final class PageListView: NSScrollView, NSTableViewDataSource, NSTableViewDelega
         guard let row = pages.firstIndex(where: { $0.id == id }), pages[row].title != title else { return }
         pages[row].title = title
         table.reloadData(forRowIndexes: [row], columnIndexes: [0])
+    }
+
+    /// The on-screen row for a page (to anchor the share sheet), if visible.
+    func rowView(for id: String) -> NSView? {
+        guard let row = pages.firstIndex(where: { $0.id == id }) else { return nil }
+        return table.rowView(atRow: row, makeIfNecessary: false)
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        // The right-clicked row; VoiceOver's "show menu" sets none, so use the selection.
+        let row = table.clickedRow >= 0 ? table.clickedRow : table.selectedRow
+        guard pages.indices.contains(row) else { return }
+        (menuItems?(pages[row].id) ?? []).forEach(menu.addItem)
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { pages.count }

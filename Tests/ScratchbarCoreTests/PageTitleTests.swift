@@ -18,3 +18,26 @@ final class PageTitleTests: XCTestCase {
         XCTAssertEqual(long.count, 40)
     }
 }
+
+final class ExportFileNameTests: XCTestCase {
+    func testUsesFirstLineAsTxtName() {
+        XCTAssertEqual(exportFileName(for: "The Cheshire Cat\nWould you tell me"), "The Cheshire Cat.txt")
+    }
+
+    func testReplacesCharactersFinderCantUse() {
+        XCTAssertEqual(exportFileName(for: "ssh deploy@host: /var/log"), "ssh deploy@host- -var-log.txt")
+    }
+
+    func testBlankPageIsUntitled() {
+        XCTAssertEqual(exportFileName(for: "  \n\n"), "Untitled.txt")
+    }
+
+    func testLongFirstLineIsShortenedWithoutEllipsis() {
+        let name = exportFileName(for: String(repeating: "a", count: 300))
+        XCTAssertEqual(name, String(repeating: "a", count: 80) + ".txt")
+    }
+
+    func testLeadingDotIsRemovedSoTheFileIsntHidden() {
+        XCTAssertEqual(exportFileName(for: ".env notes"), "env notes.txt")
+    }
+}

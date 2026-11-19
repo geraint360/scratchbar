@@ -136,7 +136,8 @@ final class KeyboardSettings: NSViewController {
         recorderRow.spacing = 12
 
         let shortcuts: [(String, String)] = [
-            ("⌘N", "New page"), ("⇧⌘C", "Copy page"), ("⌘⌫", "Delete page"),
+            ("⌘N", "New page"), ("⇧⌘C", "Copy page"), ("⌘D", "Duplicate page"), ("⌘S", "Save a copy as a .txt file"),
+            ("⌘⌫", "Delete page"),
             ("⌘[  ⌘]", "Previous / next page"), ("⇧⌘F", "Search pages"), ("⌃⌘S", "Show or hide the page list"),
             ("⌘F", "Find"), ("⌘+  ⌘−  ⌘0", "Text size"), ("⌘,", "Settings"), ("⌘W", "Close the window (Esc too, when not pinned)"),
         ]

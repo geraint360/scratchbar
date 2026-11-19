@@ -40,7 +40,11 @@ log in; you can turn that off in Settings.
 it. Right-click the icon for New Page, Settings… and Quit.
 
 **Pages.** Press ⌘N or click **+** for a new page. A page you leave empty is thrown away.
-To delete a page, click the **✕** on it in the list, then confirm.
+To delete a page, click the **✕** on it in the list, then confirm. Right-click a page
+in the list to duplicate, save a copy of, share or delete it.
+
+**Sharing.** The share button (top right) sends the page to another app, such as
+DEVONthink, Mail or Notes, as a `.txt` file named after the page.
 
 **Pinning.** By default the window tucks away when you click elsewhere, like a menu.
 It also closes with Esc. Click the pin to keep it on screen instead: you can then move
@@ -62,6 +66,8 @@ at the top left.
 | ⌃⌥⌘N | New page from anywhere (change it in Settings) |
 | ⌘N | New page |
 | ⇧⌘C | Copy the whole page |
+| ⌘D | Duplicate the page |
+| ⌘S | Save a copy as a `.txt` file |
 | ⌘⌫ | Delete the page (⌘D confirms) |
 | ⌘[ / ⌘] | Previous / next page |
 | ⇧⌘F | Search all pages |

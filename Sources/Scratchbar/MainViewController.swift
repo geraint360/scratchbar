@@ -12,6 +12,7 @@ final class MainViewController: NSViewController, NSTextViewDelegate, NSSearchFi
     private(set) var textView: PlainTextView!
     private let countLabel = NSTextField(labelWithString: "")
     private let copyButton = NSButton()
+    private let shareButton = NSButton()
     private let pinButton = NSButton()
     private let settingsButton = NSButton()
     private let sidebarButton = NSButton()
@@ -81,6 +82,7 @@ final class MainViewController: NSViewController, NSTextViewDelegate, NSSearchFi
 
         list.onSelect = { [weak self] id in self?.selectPage(id: id) }
         list.onDelete = { [weak self] id in self?.deletePage(id: id) }
+        list.menuItems = { [weak self] id in self?.contextMenuItems(for: id) ?? [] }
 
         searchField.placeholderString = "Search pages"
         searchField.controlSize = .small
@@ -104,6 +106,7 @@ final class MainViewController: NSViewController, NSTextViewDelegate, NSSearchFi
             (sidebarButton, "sidebar.left", "Hide page list", #selector(toggleSidebar(_:)), "Show or hide the page list (⌃⌘S)"),
             (newButton, "plus", "New page", #selector(newPage(_:)), "New page (⌘N)"),
             (copyButton, "doc.on.doc", "Copy page", #selector(copyPage(_:)), "Copy page (⇧⌘C)"),
+            (shareButton, "square.and.arrow.up", "Share page", #selector(sharePage(_:)), "Share page (to DEVONthink, Mail…)"),
             (pinButton, "pin", "Pin", #selector(togglePin(_:)), ""),
             (settingsButton, "gearshape", "Settings", #selector(showSettings(_:)), "Settings (⌘,)"),
         ] {
@@ -119,7 +122,7 @@ final class MainViewController: NSViewController, NSTextViewDelegate, NSSearchFi
         // controls on the right. All on one row in the title bar.
         let leftControls = NSStackView(views: [sidebarButton, newButton])
         leftControls.spacing = 14
-        let controls = NSStackView(views: [copyButton, pinButton, settingsButton])
+        let controls = NSStackView(views: [copyButton, shareButton, pinButton, settingsButton])
         controls.spacing = 14
 
         bannerStack.orientation = .vertical
@@ -668,6 +671,99 @@ final class MainViewController: NSViewController, NSTextViewDelegate, NSSearchFi
         }
         countWork = work
         if now { work.perform() } else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work) }
+    }
+
+    // MARK: - Duplicate, save a copy, share
+
+    /// The page a command applies to: the right-clicked row's page when it
+    /// comes from the list's menu, otherwise the open page.
+    private func pageID(from sender: Any?) -> String? {
+        (sender as? NSMenuItem)?.representedObject as? String ?? currentID
+    }
+
+    /// The text of page `id`: the editor's text if it's open, else from disk.
+    private func text(of id: String) -> String? {
+        if id == currentID { return editorHoldsPageText ? textView.string : nil }
+        return try? store.read(id)
+    }
+
+    private func contextMenuItems(for id: String) -> [NSMenuItem] {
+        [("Duplicate", #selector(duplicatePage(_:))), ("Save a Copy…", #selector(saveCopy(_:))),
+         ("Share…", #selector(sharePage(_:))), (nil, nil), ("Delete…", #selector(deleteFromMenu(_:)))]
+            .map { title, action in
+                guard let title, let action else { return .separator() }
+                let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+                item.target = self
+                item.representedObject = id
+                return item
+            }
+    }
+
+    /// ⌘D: a copy of the page, opened at the top of the list.
+    @objc func duplicatePage(_ sender: Any?) {
+        guard let id = pageID(from: sender), let text = text(of: id), !text.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        if searchIDs != nil {
+            searchField.stringValue = ""
+            searchIDs = nil
+        }
+        addPage(text: text, select: true)
+        focusEditor()
+    }
+
+    /// ⌘S: writes a copy of the page to a .txt file you choose. The page
+    /// itself stays in Scratchbar.
+    @objc func saveCopy(_ sender: Any?) {
+        guard let id = pageID(from: sender), let text = text(of: id), let window = view.window else {
+            NSSound.beep()
+            return
+        }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = exportFileName(for: text)
+        panel.allowedContentTypes = [.plainText]
+        panel.isExtensionHidden = false
+        if let folder = UserDefaults.standard.url(forKey: DefaultsKey.lastSaveFolder) { panel.directoryURL = folder }
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try Data(text.utf8).write(to: url, options: .atomic)
+                UserDefaults.standard.set(url.deletingLastPathComponent(), forKey: DefaultsKey.lastSaveFolder)
+            } catch {
+                let alert = NSAlert(error: error)
+                alert.messageText = "Couldn't save a copy of this page."
+                alert.beginSheetModal(for: window)
+            }
+        }
+    }
+
+    /// Shares the page as a .txt file named after it, so apps like
+    /// DEVONthink and Mail keep its title.
+    @objc func sharePage(_ sender: Any?) {
+        guard let id = pageID(from: sender), let text = text(of: id) else {
+            NSSound.beep()
+            return
+        }
+        let anchor: NSView = sender is NSMenuItem ? (list.rowView(for: id) ?? shareButton) : shareButton
+        // One reused folder, so shared copies don't pile up in the temp folder.
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Scratchbar Share", isDirectory: true)
+        try? FileManager.default.removeItem(at: folder)
+        let url = folder.appendingPathComponent(exportFileName(for: text))
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url, options: .atomic)
+        } catch {
+            NSLog("Scratchbar: couldn't prepare page for sharing: \(error)")
+            NSSound.beep()
+            return
+        }
+        NSSharingServicePicker(items: [url]).show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+    }
+
+    @objc private func deleteFromMenu(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        deletePage(id: id)
     }
 
     // MARK: - Actions

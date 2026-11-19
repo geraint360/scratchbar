@@ -344,6 +344,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         submenu("Page", [
             item("New Page", #selector(MainViewController.newPage(_:)), "n", target: main),
             item("Copy Page", #selector(MainViewController.copyPage(_:)), "c", [.command, .shift], target: main),
+            item("Duplicate Page", #selector(MainViewController.duplicatePage(_:)), "d", target: main),
+            item("Save a Copy…", #selector(MainViewController.saveCopy(_:)), "s", target: main),
+            item("Share…", #selector(MainViewController.sharePage(_:)), "", target: main),
             item("Delete Page", #selector(MainViewController.deletePage(_:)), "\u{8}", target: main),
             item("Previous Page", #selector(MainViewController.previousPage(_:)), "[", target: main),
             item("Next Page", #selector(MainViewController.nextPage(_:)), "]", target: main),

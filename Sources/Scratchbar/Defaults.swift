@@ -11,5 +11,6 @@ enum DefaultsKey {
     static let colorScheme = "colorScheme"
     static let sidebarWidth = "sidebarWidth"
     static let sidebarCollapsed = "sidebarCollapsed"
+    static let lastSaveFolder = "lastSaveFolder"
     static let loginItemSetUp = "loginItemSetUp"
 }
