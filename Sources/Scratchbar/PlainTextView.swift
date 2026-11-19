@@ -59,6 +59,26 @@ final class PlainTextView: NSTextView {
 
     var fontSize: CGFloat { font?.pointSize ?? Self.defaultFontSize }
 
+    /// Shades `ranges` (search matches) without changing the text itself, so
+    /// nothing is saved, undone or copied with it.
+    func highlight(_ ranges: [NSRange]) {
+        let length = (string as NSString).length
+        if let layout = textLayoutManager, let content = layout.textContentManager {
+            layout.removeRenderingAttribute(.backgroundColor, for: layout.documentRange)
+            for range in ranges where NSMaxRange(range) <= length {
+                guard let start = content.location(content.documentRange.location, offsetBy: range.location),
+                      let end = content.location(start, offsetBy: range.length),
+                      let textRange = NSTextRange(location: start, end: end) else { continue }
+                layout.addRenderingAttribute(.backgroundColor, value: Theme.match, for: textRange)
+            }
+        } else if let layout = layoutManager {
+            layout.removeTemporaryAttribute(.backgroundColor, forCharacterRange: NSRange(location: 0, length: length))
+            for range in ranges where NSMaxRange(range) <= length {
+                layout.addTemporaryAttribute(.backgroundColor, value: Theme.match, forCharacterRange: range)
+            }
+        }
+    }
+
     // Esc is bound to `complete:` in text views; make it close the window instead.
     override func complete(_ sender: Any?) {
         window?.cancelOperation(sender)

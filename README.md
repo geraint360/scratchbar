@@ -15,7 +15,7 @@ optional iCloud Drive sync between Macs, and local backups.
 - **Pin** (top right) keeps the window on screen; unpinned it closes when you click elsewhere.
 - ⌘+ / ⌘− / ⌘0 change the text size. ⌘F finds.
 - ⌘[ / ⌘] go to the previous / next page in the list. ⇧⌘F (or the field under the list)
-  searches the text of every page.
+  searches the text of every page and highlights the matches in the open page.
 - The page list can be dragged wider or narrower, or hidden with the sidebar button (⌃⌘S).
 - The bottom line shows when the page was last edited, plus its word and character count.
 - In the delete prompt, ⌘D (or Return) deletes.

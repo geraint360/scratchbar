@@ -240,6 +240,16 @@ final class MainViewController: NSViewController, NSTextViewDelegate, NSSearchFi
     @objc private func searchChanged(_ sender: Any?) {
         updateSearch()
         showList(selectedID: currentID)
+        refreshHighlights(scrollToFirst: true)
+    }
+
+    /// While searching, shades every match in the open page (and can scroll
+    /// to the first one); otherwise clears the shading.
+    private func refreshHighlights(scrollToFirst: Bool) {
+        guard let textView else { return }
+        let ranges = searchIDs == nil || !editorHoldsPageText ? [] : matchRanges(of: searchField.stringValue, in: textView.string)
+        textView.highlight(ranges)
+        if scrollToFirst, let first = ranges.first { textView.scrollRangeToVisible(first) }
     }
 
     /// Re-runs the search against every page's text (only while searching).
@@ -366,6 +376,7 @@ final class MainViewController: NSViewController, NSTextViewDelegate, NSSearchFi
             editorHoldsPageText = false
             setEditorText("Couldn't open this page:\n\(error.localizedDescription)", editable: false)
         }
+        refreshHighlights(scrollToFirst: true)
         showList(selectedID: id)
     }
 
@@ -634,14 +645,6 @@ final class MainViewController: NSViewController, NSTextViewDelegate, NSSearchFi
         updateCounts(now: false)
     }
 
-    private static let editedFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        f.doesRelativeDateFormatting = true
-        return f
-    }()
-
     private func updateCounts(now: Bool) {
         countWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -658,9 +661,10 @@ final class MainViewController: NSViewController, NSTextViewDelegate, NSSearchFi
             var parts = ["\(words) \(words == 1 ? "word" : "words")", "\(chars) \(chars == 1 ? "character" : "characters")"]
             if let id = self.currentID, self.scheduler.knownOnDisk.contains(id) || !text.isEmpty,
                let modified = self.pages.first(where: { $0.id == id })?.modified {
-                parts.insert("Edited \(Self.editedFormatter.string(from: modified))", at: 0)
+                parts.insert("Edited \(editedDescription(modified))", at: 0)
             }
             self.countLabel.stringValue = parts.joined(separator: " · ")
+            self.refreshHighlights(scrollToFirst: false)
         }
         countWork = work
         if now { work.perform() } else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work) }

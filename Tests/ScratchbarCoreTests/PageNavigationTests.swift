@@ -46,3 +46,44 @@ final class PageNavigationTests: XCTestCase {
         XCTAssertNil(adjacentPageID(in: [], from: nil, offset: 1))
     }
 }
+
+final class EditedDescriptionTests: XCTestCase {
+    private var calendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "Europe/London")!
+        return c
+    }()
+    private let locale = Locale(identifier: "en_GB")
+
+    private func date(_ day: Int, _ hour: Int, _ minute: Int) -> Date {
+        calendar.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute))!
+    }
+
+    func testTodayAndYesterdayAreLowercase() {
+        let now = date(19, 15, 0)
+        XCTAssertEqual(editedDescription(date(19, 11, 23), now: now, calendar: calendar, locale: locale), "today at 11:23")
+        XCTAssertEqual(editedDescription(date(18, 9, 5), now: now, calendar: calendar, locale: locale), "yesterday at 09:05")
+    }
+
+    func testOlderDatesShowTheDate() {
+        let now = date(19, 15, 0)
+        XCTAssertEqual(editedDescription(date(2, 16, 40), now: now, calendar: calendar, locale: locale), "2 Nov 2026 at 16:40")
+    }
+}
+
+final class MatchRangeTests: XCTestCase {
+    func testFindsEveryMatchIgnoringCaseAndAccents() {
+        let text = "Café notes: cafe, CAFÉ."
+        XCTAssertEqual(matchRanges(of: "cafe", in: text),
+                       [NSRange(location: 0, length: 4), NSRange(location: 12, length: 4), NSRange(location: 18, length: 4)])
+    }
+
+    func testBlankQueryOrNoMatchGivesNothing() {
+        XCTAssertEqual(matchRanges(of: "  ", in: "anything"), [])
+        XCTAssertEqual(matchRanges(of: "zzz", in: "anything"), [])
+    }
+
+    func testRangesAreUTF16ForEmoji() {
+        XCTAssertEqual(matchRanges(of: "b", in: "😀 b"), [NSRange(location: 3, length: 1)])
+    }
+}
