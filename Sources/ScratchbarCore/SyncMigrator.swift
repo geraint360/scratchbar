@@ -11,17 +11,23 @@ public enum SyncError: Error, LocalizedError {
 public enum SyncMigrator {
     public static var currentMacName: String { Host.current().localizedName ?? "this Mac" }
 
-    /// Turning sync on: back up every local page, then move them into iCloud Drive.
-    public static func enable(locations: StorageLocations, backups: BackupStore, macName: String = currentMacName) throws {
+    /// Turning sync on: back up every local page, copy them all into iCloud
+    /// Drive, and only then remove the local copies (a failure part-way leaves
+    /// every local page in place).
+    public static func enable(locations: StorageLocations, backups: BackupStore, macName: String = currentMacName,
+                              cloudStore: PageStoring? = nil) throws {
         guard locations.iCloudAvailable, let cloudFolder = locations.iCloud else { throw SyncError.iCloudUnavailable }
         let local = PageStore(folder: locations.local)
-        let cloud = PageStore(folder: cloudFolder)
         // The iCloud root exists (checked above), so this only creates "Scratchbar".
         try FileManager.default.createDirectory(at: cloudFolder, withIntermediateDirectories: true)
-        for page in try local.list() {
+        let cloud = cloudStore ?? PageStore(folder: cloudFolder)
+        let pages = try local.list()
+        for page in pages {
             let text = try local.read(page.id)
             backups.backup(id: page.id, text: text, reason: .beforeSync)
             try merge(text: text, id: page.id, into: cloud, suffix: "from \(macName)")
+        }
+        for page in pages {
             try local.remove(page.id)
         }
     }
@@ -43,7 +49,7 @@ public enum SyncMigrator {
 
     /// Adds `text` to `store` as `id`: skips it if any page already has the same
     /// text; writes it under a new name if `id` exists with different text.
-    static func merge(text: String, id: String, into store: PageStore, suffix: String) throws {
+    static func merge(text: String, id: String, into store: PageStoring, suffix: String) throws {
         let existing = try store.list()
         for page in existing where (try? store.read(page.id)) == text { return }
         let target = existing.contains { $0.id == id } ? uniqueID("\(id) (\(suffix))", in: store) : id
@@ -51,10 +57,11 @@ public enum SyncMigrator {
     }
 
     /// `base`, or `base 2`, `base 3`… whichever doesn't exist yet in `store`.
-    static func uniqueID(_ base: String, in store: PageStore) -> String {
+    static func uniqueID(_ base: String, in store: PageStoring) -> String {
+        let taken = Set(((try? store.list()) ?? []).map(\.id))
         var candidate = base
         var n = 2
-        while FileManager.default.fileExists(atPath: store.url(for: candidate).path) {
+        while taken.contains(candidate) {
             candidate = "\(base) \(n)"
             n += 1
         }

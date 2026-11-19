@@ -1,7 +1,9 @@
 import Foundation
 
-public enum PageStoreError: Error {
-    case coordination(Error)
+public enum PageStoreError: Error, Equatable {
+    case coordination(NSError)
+    /// iCloud hasn't downloaded the file yet (a download has been requested).
+    case notDownloaded
 }
 
 /// What the UI needs from page storage. `PageStore` is one folder;
@@ -20,16 +22,27 @@ public final class PageStore: PageStoring {
     public let folder: URL
     public let location: PageLocation
     private let trash: (URL) throws -> Void
+    private let isDownloaded: (URL) -> Bool
 
     /// Bytes read from each file to build its sidebar title.
     static let titlePrefixBytes = 8 * 1024
 
     public init(folder: URL,
                 location: PageLocation = .primary,
-                trash: @escaping (URL) throws -> Void = PageStore.moveToTrash) {
+                trash: @escaping (URL) throws -> Void = PageStore.moveToTrash,
+                isDownloaded: @escaping (URL) -> Bool = PageStore.isDownloaded) {
         self.folder = folder
         self.location = location
         self.trash = trash
+        self.isDownloaded = isDownloaded
+    }
+
+    /// False for an iCloud file whose contents aren't on this Mac yet. Reading
+    /// one would block while it downloads, so callers show "Downloading…".
+    public static func isDownloaded(_ url: URL) -> Bool {
+        let status = (try? url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey]))?
+            .ubiquitousItemDownloadingStatus
+        return status != .notDownloaded
     }
 
     public static func moveToTrash(_ url: URL) throws {
@@ -58,6 +71,10 @@ public final class PageStore: PageStoring {
                 try? fm.startDownloadingUbiquitousItem(at: self.url(for: id))
                 placeholders.append(Page(id: id, modified: modified, title: "Downloading…",
                                          location: location, isDownloading: true))
+            } else if !name.hasPrefix("."), url.pathExtension == PageKind.text.rawValue, !isDownloaded(url) {
+                try? fm.startDownloadingUbiquitousItem(at: url)
+                placeholders.append(Page(id: url.deletingPathExtension().lastPathComponent, modified: modified,
+                                         title: "Downloading…", location: location, isDownloading: true))
             } else if !name.hasPrefix("."), url.pathExtension == PageKind.text.rawValue {
                 pages.append(Page(id: url.deletingPathExtension().lastPathComponent, modified: modified,
                                   title: pageTitle(for: readTitlePrefix(url)), location: location))
@@ -69,6 +86,10 @@ public final class PageStore: PageStoring {
     }
 
     public func read(_ id: String) throws -> String {
+        guard isDownloaded(url(for: id)) else {
+            try? FileManager.default.startDownloadingUbiquitousItem(at: url(for: id))
+            throw PageStoreError.notDownloaded
+        }
         var result: Result<Data, Error> = .success(Data())
         try coordinate(reading: url(for: id)) { url in
             result = Result { try Data(contentsOf: url) }
@@ -116,12 +137,12 @@ public final class PageStore: PageStoring {
     private func coordinate(reading url: URL, _ body: (URL) -> Void) throws {
         var error: NSError?
         NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: url, options: [], error: &error, byAccessor: body)
-        if let error { throw PageStoreError.coordination(error) }
+        if let error { throw PageStoreError.coordination(error as NSError) }
     }
 
     private func coordinate(writing url: URL, options: NSFileCoordinator.WritingOptions, _ body: (URL) -> Void) throws {
         var error: NSError?
         NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: url, options: options, error: &error, byAccessor: body)
-        if let error { throw PageStoreError.coordination(error) }
+        if let error { throw PageStoreError.coordination(error as NSError) }
     }
 }

@@ -21,15 +21,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        repository = PageRepository(locations: locations, syncEnabled: UserDefaults.standard.bool(forKey: DefaultsKey.syncEnabled))
-        main = MainViewController(store: repository)
         backups = BackupStore(folder: locations.backups)
+        repository = makeRepository(syncEnabled: UserDefaults.standard.bool(forKey: DefaultsKey.syncEnabled))
+        main = MainViewController(store: repository)
         backups.prune()
         main.onSaved = { [unowned self] id, text in
             backups.backupIfDue(id: id, text: text)
             refreshSyncStatus()
         }
         main.backup = { [unowned self] id, text, reason in backups.backup(id: id, text: text, reason: reason) }
+        main.didDiscard = { [unowned self] id in backups.markDeleted(id: id) }
         main.resolveVersionConflicts = { [unowned self] id in resolveVersionConflicts(id: id) }
         main.willDelete = { [unowned self] id, text in
             backups.backup(id: id, text: text, reason: .beforeDelete)
@@ -139,11 +140,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         UserDefaults.standard.set(turningOn, forKey: DefaultsKey.syncEnabled)
-        repository = PageRepository(locations: locations, syncEnabled: turningOn)
+        repository = makeRepository(syncEnabled: turningOn)
         main.store = repository
         main.resetForStorageChange()
         retryPendingSync()
         startWatching()
+    }
+
+    private func makeRepository(syncEnabled: Bool) -> PageRepository {
+        let repo = PageRepository(locations: locations, syncEnabled: syncEnabled)
+        repo.backup = { [unowned self] id, text in backups.backup(id: id, text: text, reason: .beforeSync) }
+        return repo
     }
 
     /// Watches the active pages folder for changes from iCloud, Finder or other editors.

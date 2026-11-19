@@ -43,6 +43,9 @@ public final class PageRepository: PageStoring {
     private let primary: PageStore
     private let pending: PageStore
 
+    /// Called with (id, text) before flushPending overwrites a different version.
+    public var backup: ((String, String) -> Void)?
+
     /// True while some pages are saved only on this Mac because iCloud failed.
     public private(set) var isDegraded = false
 
@@ -78,7 +81,12 @@ public final class PageRepository: PageStoring {
     }
 
     public func write(_ id: String, text: String) throws {
-        guard syncEnabled else { return try primary.write(id, text: text) }
+        guard syncEnabled else {
+            try primary.write(id, text: text)
+            // A copy left in Pending from when sync was on is now stale.
+            if pendingIDs().contains(id) { try? pending.remove(id) }
+            return
+        }
         if locations.iCloudAvailable {
             do {
                 try primary.write(id, text: text)
@@ -107,19 +115,28 @@ public final class PageRepository: PageStoring {
     /// Returns how many were moved.
     @discardableResult
     public func flushPending() -> Int {
-        guard syncEnabled, locations.iCloudAvailable else { return 0 }
+        guard canWritePrimary else { return 0 }
         var moved = 0
         for id in pendingIDs() {
             guard let text = try? pending.read(id) else { continue }
             do {
-                // If another Mac changed this page in iCloud after our offline
-                // edit, keep both rather than overwrite theirs.
+                // Never silently replace a different version already there:
+                // keep both if it's newer or unreadable, otherwise back it up.
                 var target = id
-                let cloudURL = primary.url(for: id)
-                if let cloudText = try? primary.read(id), cloudText != text,
-                   let cloudDate = modificationDate(cloudURL),
-                   let ourDate = modificationDate(pending.url(for: id)), cloudDate > ourDate {
-                    target = SyncMigrator.uniqueID("\(id) (from \(macName))", in: primary)
+                let existingURL = primary.url(for: id)
+                if FileManager.default.fileExists(atPath: existingURL.path) {
+                    if let existing = try? primary.read(id) {
+                        if existing != text {
+                            if let theirs = modificationDate(existingURL), let ours = modificationDate(pending.url(for: id)),
+                               theirs > ours {
+                                target = SyncMigrator.uniqueID("\(id) (from \(macName))", in: primary)
+                            } else {
+                                backup?(id, existing)
+                            }
+                        }
+                    } else {
+                        target = SyncMigrator.uniqueID("\(id) (from \(macName))", in: primary)
+                    }
                 }
                 try primary.write(target, text: text)
                 try pending.remove(id)

@@ -37,6 +37,11 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
 
     /// The text last read from or written to disk for the current page.
     private var lastSavedText = ""
+    /// False while the editor shows a message (downloading, read error) instead
+    /// of the page's real text: such text must never be saved or "kept".
+    private var editorHoldsPageText = false
+    /// Called when an emptied page's file is discarded (so backups can mark it deleted).
+    var didDiscard: (String) -> Void = { _ in }
     private var bannerKind: BannerKind?
     private enum BannerKind { case edited(other: String), deleted }
 
@@ -204,7 +209,8 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
 
     /// Re-reads the page list from storage, keeping the current page selected.
     func reloadList() {
-        var loaded = (try? store.list()) ?? []
+        // If listing fails, keep what we have rather than forgetting which pages exist.
+        guard var loaded = try? store.list() else { return }
         scheduler.knownOnDisk = Set(loaded.map(\.id))
         // A new, unsaved page only exists in memory: keep it in the list.
         if let currentID, !loaded.contains(where: { $0.id == currentID }),
@@ -251,23 +257,40 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
         clearBanner()
         currentID = id
         UserDefaults.standard.set(id, forKey: DefaultsKey.lastPageID)
-        if scheduler.knownOnDisk.contains(id) {
-            do {
-                let text = try store.read(id)
-                lastSavedText = text
-                setEditorText(text, editable: !(pages.first { $0.id == id }?.isDownloading ?? false))
-            } catch where pages.first(where: { $0.id == id })?.isDownloading == true {
-                setEditorText("Downloading from iCloud…", editable: false)
-            } catch {
-                // Never show an editable blank page for a file we failed to read:
-                // typing would overwrite it.
-                setEditorText("Couldn't open this page:\n\(error.localizedDescription)", editable: false)
-            }
-        } else {
-            lastSavedText = ""
-            setEditorText("", editable: true)  // new page, not on disk yet
+        // Decide from the read itself, not from the cached list of pages on disk.
+        do {
+            let text = try store.read(id)
+            scheduler.knownOnDisk.insert(id)
+            showPageText(text)
+        } catch PageStoreError.notDownloaded {
+            editorHoldsPageText = false
+            setEditorText("Downloading from iCloud…", editable: false)
+        } catch where Self.isMissingFile(error) && !scheduler.knownOnDisk.contains(id) {
+            showPageText("")  // new page, not on disk yet
+        } catch {
+            // Never show an editable blank page for a file we failed to read:
+            // typing would overwrite it.
+            editorHoldsPageText = false
+            setEditorText("Couldn't open this page:\n\(error.localizedDescription)", editable: false)
         }
         list.show(pages, selectedID: id)
+    }
+
+    private func showPageText(_ text: String) {
+        lastSavedText = text
+        editorHoldsPageText = true
+        setEditorText(text, editable: true)
+    }
+
+    private static func isMissingFile(_ error: Error) -> Bool {
+        var e: NSError? = error as NSError
+        if case PageStoreError.coordination(let inner) = error { e = inner }
+        while let current = e {
+            if current.domain == NSCocoaErrorDomain && current.code == NSFileReadNoSuchFileError { return true }
+            if current.domain == NSPOSIXErrorDomain && current.code == Int(ENOENT) { return true }
+            e = current.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
     }
 
     private func setEditorText(_ text: String, editable: Bool) {
@@ -295,18 +318,21 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
         pages.insert(Page(id: id, modified: Date(), title: "Empty"), at: 0)
         currentID = id
         UserDefaults.standard.set(id, forKey: DefaultsKey.lastPageID)
-        setEditorText("", editable: true)
+        clearBanner()
+        showPageText("")
         list.show(pages, selectedID: id)
     }
 
     /// Flushes saves and discards the current page if it is empty.
     func leaveCurrentPage() {
         scheduler.flush()
-        guard let id = currentID, currentText.isEmpty, textView.isEditable else { return }
+        guard let id = currentID, currentText.isEmpty, textView.isEditable, editorHoldsPageText else { return }
         scheduler.cancel(id: id)
         if scheduler.knownOnDisk.contains(id) {
+            // Its last text was backed up when it was emptied (see save).
             try? store.remove(id)
             scheduler.knownOnDisk.remove(id)
+            didDiscard(id)
         }
         pages.removeAll { $0.id == id }
         currentID = nil
@@ -353,12 +379,17 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
     }
 
     private func save(id: String, text: String) {
+        if id == currentID, !editorHoldsPageText { return }
         if id == currentID, bannerKind == nil, scheduler.knownOnDisk.contains(id) {
             let disk = try? store.read(id)
             if saveWouldOverwriteRemoteChange(diskText: disk, lastSavedText: lastSavedText, newText: text), let disk {
                 showEditedBanner(id: id, other: disk)
                 return
             }
+        }
+        // Emptying a page is how it gets discarded: keep its last text first.
+        if id == currentID, text.isEmpty, !lastSavedText.isEmpty {
+            backup(id, lastSavedText, .beforeDelete)
         }
         do {
             try store.write(id, text: text)
@@ -383,7 +414,8 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
                 otherText = disk
             }
             if case .conflict(let id) = event, id == currentID { otherText = conflictTexts[id] }
-            let dirty = scheduler.hasPendingChanges || textView.string != lastSavedText
+            // A message in the editor (downloading, read error) is never "your edits".
+            let dirty = editorHoldsPageText && (scheduler.hasPendingChanges || textView.string != lastSavedText)
             actions += decide(event, openPageID: currentID, editorDirty: dirty)
         }
         guard !actions.isEmpty else { return }
@@ -391,8 +423,10 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
         guard let id = currentID else { return }
         if actions.contains(.showDeletedBanner) {
             showDeletedBanner(id: id)
-        } else if actions.contains(.showEditedBanner), let otherText {
+        } else if actions.contains(.showEditedBanner), let otherText, editorHoldsPageText {
             showEditedBanner(id: id, other: otherText)
+        } else if actions.contains(.showEditedBanner), !editorHoldsPageText {
+            load(id: id)
         } else if actions.contains(.reloadOpenPage), bannerKind == nil {
             let selection = textView.selectedRange()
             load(id: id)
@@ -416,6 +450,10 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
 
     private func showEditedBanner(id: String, other: String) {
         scheduler.cancel(id: id)
+        // Back up both versions now: the editor holds the only copy of this
+        // Mac's unsaved edits until you choose.
+        backup(id, textView.string, .beforeConflict)
+        backup(id, other, .beforeConflict)
         let banner = BannerView(message: "Edited on another Mac", buttons: [
             ("Keep This Mac's", { [weak self] in self?.resolveEdited(id: id, other: other, choice: .keepThisMac) }),
             ("Keep Other", { [weak self] in self?.resolveEdited(id: id, other: other, choice: .keepOther) }),
@@ -425,7 +463,7 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
     }
 
     private func resolveEdited(id: String, other: String, choice: ConflictChoice) {
-        guard id == currentID else { return clearBanner() }
+        guard id == currentID, editorHoldsPageText else { return clearBanner() }
         let current = textView.string
         backup(id, current, .beforeConflict)
         backup(id, other, .beforeConflict)

@@ -91,6 +91,58 @@ final class StorageLocationsTests: XCTestCase {
         XCTAssertEqual(try repo.list().filter { $0.id == "p" }.count, 1)
     }
 
+    // Review C1: a Pending copy must not shadow edits once sync is off.
+    func testSyncOffWriteReplacesStalePendingCopy() throws {
+        let f = SyncFixture(cloudAvailable: false)
+        try PageRepository(locations: f.locations, syncEnabled: true).write("a", text: "offline v1")
+        let repo = PageRepository(locations: f.locations, syncEnabled: false)
+        try repo.write("a", text: "v2 typed after turning sync off")
+        XCTAssertEqual(try repo.read("a"), "v2 typed after turning sync off")
+        XCTAssertEqual(f.files(in: f.locations.pending), [])
+    }
+
+    func testSyncOffFlushPendingMovesIntoLocal() throws {
+        let f = SyncFixture(cloudAvailable: false)
+        try PageRepository(locations: f.locations, syncEnabled: true).write("a", text: "offline")
+        let repo = PageRepository(locations: f.locations, syncEnabled: false)
+        XCTAssertEqual(repo.flushPending(), 1)
+        XCTAssertEqual(f.text(f.locations.local, "a.txt"), "offline")
+        XCTAssertEqual(f.files(in: f.locations.pending), [])
+    }
+
+    // Review I2: never overwrite iCloud text without a backup; unreadable → keep both.
+    func testFlushPendingBacksUpOverwrittenICloudText() throws {
+        let f = SyncFixture(cloudAvailable: false)
+        var backedUp: [String] = []
+        let repo = PageRepository(locations: f.locations, syncEnabled: true, macName: "Studio")
+        repo.backup = { _, text in backedUp.append(text) }
+        try repo.write("p", text: "newer offline edit")
+        f.makeCloudAvailable()
+        try FileManager.default.createDirectory(at: f.locations.iCloud!, withIntermediateDirectories: true)
+        let cloudFile = f.locations.iCloud!.appendingPathComponent("p.txt")
+        try Data("older cloud text".utf8).write(to: cloudFile)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3600)], ofItemAtPath: cloudFile.path)
+        repo.flushPending()
+        XCTAssertEqual(f.text(f.locations.iCloud!, "p.txt"), "newer offline edit")
+        XCTAssertEqual(backedUp, ["older cloud text"])
+    }
+
+    func testFlushPendingKeepsBothWhenICloudUnreadable() throws {
+        let f = SyncFixture(cloudAvailable: false)
+        let repo = PageRepository(locations: f.locations, syncEnabled: true, macName: "Studio")
+        try repo.write("p", text: "offline edit")
+        f.makeCloudAvailable()
+        try FileManager.default.createDirectory(at: f.locations.iCloud!, withIntermediateDirectories: true)
+        let cloudFile = f.locations.iCloud!.appendingPathComponent("p.txt")
+        try Data("their text".utf8).write(to: cloudFile)
+        try FileManager.default.setAttributes([.posixPermissions: 0o200], ofItemAtPath: cloudFile.path)  // write-only: unreadable
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: cloudFile.path) }
+        repo.flushPending()
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: cloudFile.path)
+        XCTAssertEqual(f.text(f.locations.iCloud!, "p.txt"), "their text")
+        XCTAssertEqual(f.text(f.locations.iCloud!, "p (from Studio).txt"), "offline edit")
+    }
+
     func testSyncOffNeverTouchesICloud() throws {
         let f = SyncFixture()
         let repo = PageRepository(locations: f.locations, syncEnabled: false)
@@ -141,6 +193,17 @@ final class SyncMigratorTests: XCTestCase {
         XCTAssertEqual(f.text(f.locations.iCloud!, "a (from Studio).txt"), "from this Mac")
     }
 
+    // Review I4: a failure partway through must not remove any local page.
+    func testEnableFailingPartwayKeepsAllLocalPages() throws {
+        let f = SyncFixture()
+        try writeLocal(f, "a.txt", "alpha")
+        try writeLocal(f, "b.txt", "beta")
+        let failing = FailingStore(wrapping: PageStore(folder: f.locations.iCloud!), failOnWrite: 2)
+        XCTAssertThrowsError(try SyncMigrator.enable(locations: f.locations, backups: BackupStore(folder: f.locations.backups),
+                                                     macName: "Studio", cloudStore: failing))
+        XCTAssertEqual(f.files(in: f.locations.local), ["a.txt", "b.txt"])
+    }
+
     func testEnableFailsWhenICloudUnavailable() throws {
         let f = SyncFixture(cloudAvailable: false)
         try writeLocal(f, "a.txt", "alpha")
@@ -160,4 +223,21 @@ final class SyncMigratorTests: XCTestCase {
         XCTAssertEqual(f.text(f.locations.local, "b.txt"), "beta")
         XCTAssertEqual(backups.versions(id: "b").first?.text, "old local beta", "overwritten local copy is backed up")
     }
+}
+
+/// A store whose Nth write throws.
+final class FailingStore: PageStoring {
+    let inner: PageStore
+    let failOnWrite: Int
+    private var writes = 0
+    init(wrapping inner: PageStore, failOnWrite: Int) { self.inner = inner; self.failOnWrite = failOnWrite }
+    func list() throws -> [Page] { try inner.list() }
+    func read(_ id: String) throws -> String { try inner.read(id) }
+    func write(_ id: String, text: String) throws {
+        writes += 1
+        if writes == failOnWrite { throw CocoaError(.fileWriteUnknown) }
+        try inner.write(id, text: text)
+    }
+    func delete(_ id: String) throws { try inner.delete(id) }
+    func remove(_ id: String) throws { try inner.remove(id) }
 }

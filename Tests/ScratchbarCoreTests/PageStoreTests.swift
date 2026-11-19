@@ -95,6 +95,20 @@ final class PageStoreTests: XCTestCase {
         XCTAssertEqual(titles["b"], "Empty")
     }
 
+    // Review I3: files iCloud hasn't downloaded are never read (that would block).
+    func testNotDownloadedFilesListAsDownloadingWithoutReading() throws {
+        let store = PageStore(folder: folder, isDownloaded: { $0.lastPathComponent != "cloudy.txt" })
+        try store.write("here", text: "Local page")
+        try store.write("cloudy", text: "Not really here")
+        let cloudy = try XCTUnwrap(try store.list().first { $0.id == "cloudy" })
+        XCTAssertTrue(cloudy.isDownloading)
+        XCTAssertEqual(cloudy.title, "Downloading…")
+        XCTAssertThrowsError(try store.read("cloudy")) { error in
+            XCTAssertEqual(error as? PageStoreError, .notDownloaded)
+        }
+        XCTAssertEqual(try store.read("here"), "Local page")
+    }
+
     func testListOfMissingFolderIsEmpty() throws {
         XCTAssertEqual(try PageStore(folder: folder).list(), [])
     }
