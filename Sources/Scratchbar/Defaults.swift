@@ -7,4 +7,5 @@ enum DefaultsKey {
     static let pinnedFrame = "pinnedFrame"
     static let fontSize = "fontSize"
     static let lastPageID = "lastPageID"
+    static let syncEnabled = "syncEnabled"
 }

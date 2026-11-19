@@ -9,6 +9,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shortcutSheet: ShortcutSheet?
     private var backupsSheet: BackupsSheet?
     private(set) var backups: BackupStore!
+    private let locations = StorageLocations(appSupport: AppDelegate.appSupport, iCloudRoot: StorageLocations.defaultICloudRoot)
+    private(set) var repository: PageRepository!
+    private var retryTimer: Timer?
 
     static var appSupport: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -16,11 +19,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let store = PageStore(folder: Self.appSupport.appendingPathComponent("Pages", isDirectory: true))
-        main = MainViewController(store: store)
-        backups = BackupStore(folder: Self.appSupport.appendingPathComponent("Backups", isDirectory: true))
+        repository = PageRepository(locations: locations, syncEnabled: UserDefaults.standard.bool(forKey: DefaultsKey.syncEnabled))
+        main = MainViewController(store: repository)
+        backups = BackupStore(folder: locations.backups)
         backups.prune()
-        main.onSaved = { [unowned self] id, text in backups.backupIfDue(id: id, text: text) }
+        main.onSaved = { [unowned self] id, text in
+            backups.backupIfDue(id: id, text: text)
+            refreshSyncStatus()
+        }
         main.willDelete = { [unowned self] id, text in
             backups.backup(id: id, text: text, reason: .beforeDelete)
             backups.markDeleted(id: id)
@@ -39,6 +45,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(willSleep(_:)), name: NSWorkspace.willSleepNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(didWake(_:)), name: NSWorkspace.didWakeNotification, object: nil)
+        retryPendingSync()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -53,6 +62,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.flushAll()
     }
 
+    @objc private func didWake(_ notification: Notification) {
+        retryPendingSync()
+    }
+
+    // MARK: - iCloud sync
+
+    @objc func toggleSync(_ sender: Any?) {
+        main.flushAll()
+        main.leaveCurrentPage()
+        let turningOn = !repository.syncEnabled
+        do {
+            if turningOn {
+                try SyncMigrator.enable(locations: locations, backups: backups)
+            } else {
+                try SyncMigrator.disable(locations: locations, backups: backups)
+            }
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.messageText = turningOn ? "Couldn't turn on iCloud sync." : "Couldn't turn off iCloud sync."
+            if panelController.isVisible { alert.beginSheetModal(for: panelController.panel) } else { alert.runModal() }
+            return
+        }
+        UserDefaults.standard.set(turningOn, forKey: DefaultsKey.syncEnabled)
+        repository = PageRepository(locations: locations, syncEnabled: turningOn)
+        main.store = repository
+        main.resetForStorageChange()
+        retryPendingSync()
+    }
+
+    /// Moves pages saved locally (because iCloud failed) into iCloud Drive.
+    private func retryPendingSync() {
+        if repository.flushPending() > 0 { main.reloadList() }
+        refreshSyncStatus()
+    }
+
+    private func refreshSyncStatus() {
+        statusItemController?.showsWarning = repository.isDegraded
+        if repository.isDegraded, retryTimer == nil {
+            retryTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+                self?.retryPendingSync()
+            }
+        } else if !repository.isDegraded {
+            retryTimer?.invalidate()
+            retryTimer = nil
+        }
+    }
+
     // MARK: - Settings menu actions
 
     @objc func toggleStayOnScreen(_ sender: Any?) {
@@ -64,6 +120,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hotKey = HotKeySettings.load(.standard)
         let title = "Global Shortcut…" + (hotKey.enabled ? hotKey.combo.map { "  \($0.displayString)" } ?? "" : "")
         menu.addItem(SettingsMenu.item(title, #selector(showShortcutSheet(_:)), self))
+        let sync = SettingsMenu.item("Sync with iCloud Drive", #selector(toggleSync(_:)), self)
+        sync.state = repository.syncEnabled ? .on : .off
+        if !repository.syncEnabled && !locations.iCloudAvailable {
+            sync.isEnabled = false
+            sync.title = "Sync with iCloud Drive (iCloud Drive is off)"
+        }
+        menu.addItem(sync)
+        if repository.isDegraded {
+            let status = NSMenuItem(title: "Not syncing — saved on this Mac", action: nil, keyEquivalent: "")
+            status.isEnabled = false
+            status.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)
+            menu.addItem(status)
+        }
         menu.addItem(SettingsMenu.item("Backups…", #selector(showBackups(_:)), self))
     }
 

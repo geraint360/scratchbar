@@ -279,6 +279,18 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
         focusEditor()
     }
 
+    /// After the storage folder changes (sync on/off): forget the current page
+    /// and reload from the new store.
+    func resetForStorageChange() {
+        scheduler.flush()
+        currentID = nil
+        pages = []
+        scheduler.knownOnDisk = []
+        if view.window?.isVisible == true {
+            prepareForShow(newPage: false)
+        }
+    }
+
     /// Called when the window hides: save, and drop an empty page.
     func willHide() {
         leaveCurrentPage()
