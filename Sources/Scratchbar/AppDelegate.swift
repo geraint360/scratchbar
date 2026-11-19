@@ -5,6 +5,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var statusItemController: StatusItemController!
     private(set) var panelController: PanelController!
     private(set) var main: MainViewController!
+    private let hotKeys = HotKeyCenter()
+    private var shortcutSheet: ShortcutSheet?
 
     static var appSupport: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -23,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panelController.anchorFrame = { [unowned self] in statusItemController.buttonScreenFrame }
 
         NSApp.mainMenu = buildMainMenu()
+        applyHotKeySettings()
 
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(willSleep(_:)), name: NSWorkspace.willSleepNotification, object: nil)
@@ -46,8 +49,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panelController.isPinned.toggle()
     }
 
-    /// Later tasks add their settings items here.
-    func addExtraSettings(to menu: NSMenu) {}
+    /// Items between "Stay on Screen" and "Quit".
+    func addExtraSettings(to menu: NSMenu) {
+        let hotKey = HotKeySettings.load(.standard)
+        let title = "Global Shortcut…" + (hotKey.enabled ? hotKey.combo.map { "  \($0.displayString)" } ?? "" : "")
+        menu.addItem(SettingsMenu.item(title, #selector(showShortcutSheet(_:)), self))
+    }
+
+    // MARK: - Global hotkey
+
+    /// Registers the saved hotkey. Returns false if macOS refused it.
+    @discardableResult
+    private func applyHotKeySettings() -> Bool {
+        let settings = HotKeySettings.load(.standard)
+        hotKeys.unregister()
+        guard settings.enabled, let combo = settings.combo else { return true }
+        return hotKeys.register(combo) { [weak self] in self?.hotKeyPressed() }
+    }
+
+    /// Opens a new page ready for typing; pressing it again closes the window.
+    private func hotKeyPressed() {
+        if panelController.isVisible && panelController.panel.isKeyWindow && panelController.panel.attachedSheet == nil {
+            panelController.hide()
+        } else {
+            panelController.show(newPage: true)
+        }
+    }
+
+    @objc func showShortcutSheet(_ sender: Any?) {
+        if !panelController.isVisible { panelController.show(newPage: false) }
+        let settings = HotKeySettings.load(.standard)
+        let sheet = ShortcutSheet(
+            enabled: settings.enabled, combo: settings.combo,
+            apply: { [weak self] enabled, combo in
+                HotKeySettings.save(enabled: enabled, combo: combo, to: .standard)
+                return self?.applyHotKeySettings() ?? false
+            },
+            pause: { [weak self] recording in
+                if recording { self?.hotKeys.unregister() } else { self?.applyHotKeySettings() }
+            })
+        shortcutSheet = sheet
+        sheet.begin(on: panelController.panel)
+    }
 
     // MARK: - Main menu (key equivalents only; an accessory app shows no menu bar)
 
