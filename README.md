@@ -66,5 +66,11 @@ Measured with `footprint` on macOS 27.2 (Apple Silicon), 2026-11-19:
 | Just launched, window closed | 16 MB |
 | Window open | 24 MB |
 | After adding 10 more pages | 24 MB |
+| After opening Settings (stays there until quit) | 34–35 MB |
+
+Opening Settings once costs about 13 MB that is kept until you quit: the window
+itself is freed when it closes, but AppKit keeps the toolbar, table and popup
+code it loaded, and malloc keeps the freed pages around the objects still in use.
+Opening it again doesn't add more.
 | Window closed again | 25 MB |
 | Reminders MenuBar, same Mac, same time (for comparison) | 100 MB |
