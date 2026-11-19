@@ -1,5 +1,6 @@
 import AppKit
 import ScratchbarCore
+import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var statusItemController: StatusItemController!
@@ -53,6 +54,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self, selector: #selector(didWake(_:)), name: NSWorkspace.didWakeNotification, object: nil)
         retryPendingSync()
         startWatching()
+        main.applyTranslucency(UserDefaults.standard.bool(forKey: DefaultsKey.translucent))
+        setUpLoginItemOnFirstLaunch()
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard case .newPage(let text, let hide)? = URLCommand.parse(url) else { continue }
+            if hide {
+                main.addPage(text: text, select: false)
+            } else {
+                if !panelController.isVisible { panelController.show(newPage: false) }
+                main.addPage(text: text, select: true)
+                main.focusEditor()
+            }
+        }
+    }
+
+    // MARK: - Launch at Login and translucency
+
+    /// Turn Launch at Login on the first time the app runs from /Applications
+    /// (not from a build folder, which would register the wrong copy).
+    private func setUpLoginItemOnFirstLaunch() {
+        guard !UserDefaults.standard.bool(forKey: DefaultsKey.loginItemSetUp),
+              Bundle.main.bundlePath.hasPrefix("/Applications/") else { return }
+        try? SMAppService.mainApp.register()
+        UserDefaults.standard.set(true, forKey: DefaultsKey.loginItemSetUp)
+    }
+
+    @objc func toggleLaunchAtLogin(_ sender: Any?) {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+            UserDefaults.standard.set(true, forKey: DefaultsKey.loginItemSetUp)
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.messageText = "Couldn't change Launch at Login."
+            alert.informativeText = "Move Scratchbar to the Applications folder and try again, or add it in System Settings › General › Login Items."
+            if panelController.isVisible { alert.beginSheetModal(for: panelController.panel) } else { alert.runModal() }
+        }
+    }
+
+    @objc func toggleTranslucency(_ sender: Any?) {
+        let on = !UserDefaults.standard.bool(forKey: DefaultsKey.translucent)
+        UserDefaults.standard.set(on, forKey: DefaultsKey.translucent)
+        main.applyTranslucency(on)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -173,6 +222,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(status)
         }
         menu.addItem(SettingsMenu.item("Backups…", #selector(showBackups(_:)), self))
+        menu.addItem(.separator())
+        let translucent = SettingsMenu.item("Translucent Background", #selector(toggleTranslucency(_:)), self)
+        translucent.state = UserDefaults.standard.bool(forKey: DefaultsKey.translucent) ? .on : .off
+        menu.addItem(translucent)
+        let login = SettingsMenu.item("Launch at Login", #selector(toggleLaunchAtLogin(_:)), self)
+        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        menu.addItem(login)
     }
 
     // MARK: - Backups

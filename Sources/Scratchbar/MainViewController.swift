@@ -52,8 +52,17 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
 
     // MARK: - View
 
+    /// Behind everything; visible only with Translucent Background on.
+    private let translucentBackground = NSVisualEffectView()
+
     override func loadView() {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 360))
+        translucentBackground.material = .popover
+        translucentBackground.blendingMode = .behindWindow
+        translucentBackground.state = .active
+        translucentBackground.autoresizingMask = [.width, .height]
+        translucentBackground.frame = root.bounds
+        root.addSubview(translucentBackground)
 
         let sidebar = NSVisualEffectView()
         sidebar.material = .sidebar
@@ -152,6 +161,34 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
         ])
         view = root
         refreshPinButton()
+    }
+
+    /// Translucent: the desktop shows through the editor area.
+    func applyTranslucency(_ on: Bool) {
+        _ = view
+        translucentBackground.isHidden = !on
+        view.window?.isOpaque = !on
+        view.window?.backgroundColor = on ? .clear : .windowBackgroundColor
+    }
+
+    /// Adds a page with `text` (from the URL scheme) and optionally opens it.
+    func addPage(text: String, select: Bool) {
+        _ = view
+        let id = PageStore.newID()
+        do {
+            try store.write(id, text: text)
+        } catch {
+            NSLog("Scratchbar: couldn't add page from URL: \(error)")
+            return
+        }
+        if select {
+            leaveCurrentPage()
+            currentID = nil
+            reloadList()
+            load(id: id)
+        } else {
+            reloadList()
+        }
     }
 
     func refreshPinButton() {

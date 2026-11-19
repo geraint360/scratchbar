@@ -8,4 +8,6 @@ enum DefaultsKey {
     static let fontSize = "fontSize"
     static let lastPageID = "lastPageID"
     static let syncEnabled = "syncEnabled"
+    static let translucent = "translucent"
+    static let loginItemSetUp = "loginItemSetUp"
 }
