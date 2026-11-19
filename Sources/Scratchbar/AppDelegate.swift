@@ -288,7 +288,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Opens a new page ready for typing; pressing it again closes the window.
     private func hotKeyPressed() {
-        if panelController.isVisible && panelController.panel.isKeyWindow && panelController.panel.attachedSheet == nil {
+        // "Key" alone isn't enough: a buried window stays key while another app is in front.
+        if panelController.isVisible && panelController.panel.isKeyWindow && panelController.panel.attachedSheet == nil
+            && !panelController.isCoveredByOtherWindows() {
             panelController.hide()
         } else {
             panelController.show(newPage: true)

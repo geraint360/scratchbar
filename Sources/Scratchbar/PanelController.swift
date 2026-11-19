@@ -99,7 +99,11 @@ final class PanelController: NSObject, NSWindowDelegate {
         // A non-activating panel takes keyboard focus without making Scratchbar
         // the active app (macOS may refuse activation requests), so typing works
         // straight away and clicking back into the previous app just hides it.
-        panel.makeKeyAndOrderFront(nil)
+        // orderFrontRegardless: Scratchbar is never the active app, and a plain
+        // orderFront won't raise a pinned (normal-level) window above the
+        // active app's windows.
+        panel.orderFrontRegardless()
+        panel.makeKey()
         content.focusEditor()
         startWatchingForOutsideActivity()
     }
@@ -113,7 +117,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     /// True if another app's ordinary window overlaps the panel from above.
-    private func isCoveredByOtherWindows() -> Bool {
+    func isCoveredByOtherWindows() -> Bool {
         guard let above = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow, .excludeDesktopElements],
                                                      CGWindowID(panel.windowNumber)) as? [[String: Any]],
               let primaryHeight = NSScreen.screens.first?.frame.maxY else { return false }

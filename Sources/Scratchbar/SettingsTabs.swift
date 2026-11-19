@@ -138,7 +138,7 @@ final class KeyboardSettings: NSViewController {
         let shortcuts: [(String, String)] = [
             ("⌘N", "New page"), ("⇧⌘C", "Copy page"), ("⌘⌫", "Delete page"),
             ("⌘[  ⌘]", "Previous / next page"), ("⇧⌘F", "Search pages"), ("⌃⌘S", "Show or hide the page list"),
-            ("⌘F", "Find"), ("⌘+  ⌘−  ⌘0", "Text size"), ("⌘,", "Settings"), ("Esc  ⌘W", "Close the window"),
+            ("⌘F", "Find"), ("⌘+  ⌘−  ⌘0", "Text size"), ("⌘,", "Settings"), ("⌘W", "Close the window (Esc too, when not pinned)"),
         ]
 
         let form = SettingsForm()

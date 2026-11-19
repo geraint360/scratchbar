@@ -1,90 +1,119 @@
 # Scratchbar
 
-A tiny menu bar scratchpad for macOS. Plain-text pages that save as you type,
-optional iCloud Drive sync between Macs, and local backups.
+A plain-text scratchpad that lives in your Mac's menu bar.
+
+Somewhere to paste a command, a snippet or a note you need for the next few minutes or
+weeks, without opening an editor, naming a file or remembering to save.
 
 <p align="center"><img src="docs/images/main-window.png" alt="Scratchbar's window: a list of pages on the left and the open page's plain text on the right" width="600"></p>
 
-<p align="center"><img src="docs/images/search.png" alt="Searching for “Alice”: the list narrows to matching pages and each match is highlighted in the page" width="600"></p>
+- **Always one click away.** Click the menu bar icon, or press **⌃⌥⌘N** from any app,
+  and start typing into a new page.
+- **Plain text, always.** Whatever you paste arrives as plain text, with no fonts, colours
+  or links.
+- **Saved as you type.** There's no Save. Pages are kept until you delete them.
+- **Named for you.** Each page takes its name from its first line.
+- **Search everything.** Find text across every page, with matches highlighted.
+- **Optional iCloud sync** between your Macs, plus local backups of every page.
+- **Light.** About 16 MB of memory when idle.
 
-<p align="center"><img src="docs/images/settings.png" alt="The Settings window's General tab" width="540"></p>
+## Install
+
+Scratchbar needs macOS 14 or later. There's no download yet, so build it from source
+(you'll need Xcode):
+
+```bash
+git clone https://github.com/geraint360/scratchbar.git
+cd scratchbar
+SIGN_ID=- scripts/make-app.sh --install
+```
+
+This puts Scratchbar in your Applications folder. `SIGN_ID=-` signs it for your own Mac
+only; set it to your Developer ID to sign it for sharing.
+
+Open Scratchbar and its icon appears in the menu bar. It starts automatically when you
+log in; you can turn that off in Settings.
 
 ## Using it
 
-- **Click the menu bar icon** to open or close the window. **Right-click** it for New Page, Settings… and Quit.
-- **⌃⌥⌘N** (changeable) opens a new page from anywhere, ready to type or paste.
-  Press it again, or Esc, to close.
-- Pasting always gives plain text. Pages are named from their first line.
-- **Copy** (the two-sheets icon, top right, or ⇧⌘C) copies the whole page. **Delete** (the ✕ on a
-  sidebar row, or ⌘⌫) asks first, then moves it to the Trash.
-- An empty page is thrown away when you leave it.
-- **Pin** (top right) keeps the window on screen; unpinned it closes when you click elsewhere.
-- ⌘+ / ⌘− / ⌘0 change the text size. ⌘F finds.
-- ⌘[ / ⌘] go to the previous / next page in the list. ⇧⌘F (or the field under the list)
-  searches the text of every page and highlights the matches in the open page.
-- The page list can be dragged wider or narrower, or hidden with the sidebar button (⌃⌘S).
-- The bottom line shows when the page was last edited, plus its word and character count.
-- In the delete prompt, ⌘D (or Return) deletes.
+**Opening and closing.** Click the icon to open the window and click it again to close
+it. Right-click the icon for New Page, Settings… and Quit.
 
-**Settings** (the cog, ⌘,, or right-click on the icon › Settings…):
-- General: Launch at login, Color scheme (System / Light / Dark), Text size, Stay on screen, Reset to default size.
-- Keyboard: the global shortcut (default ⌃⌥⌘N) and a list of in-app shortcuts.
-- iCloud: Sync with iCloud Drive, sync status, Show in Finder.
-- Backups: browse and restore earlier versions, including deleted pages.
-- About.
+**Pages.** Press ⌘N or click **+** for a new page. A page you leave empty is thrown away.
+To delete a page, click the **✕** on it in the list, then confirm.
 
-### URL scheme
+**Pinning.** By default the window tucks away when you click elsewhere, like a menu.
+It also closes with Esc. Click the pin to keep it on screen instead: you can then move
+and resize it, and it stays where you put it.
 
-```
+**Searching.** Type in the field under the page list (or press ⇧⌘F). The list narrows to
+the pages containing your text, and every match is highlighted. Press Return to jump
+into the first match.
+
+<p align="center"><img src="docs/images/search.png" alt="Searching for “Alice”: the list narrows to matching pages and each match is highlighted in the page" width="600"></p>
+
+**The page list.** Drag its edge to make it wider or narrower, or hide it with the button
+at the top left.
+
+### Keyboard shortcuts
+
+| Shortcut | |
+|---|---|
+| ⌃⌥⌘N | New page from anywhere (change it in Settings) |
+| ⌘N | New page |
+| ⇧⌘C | Copy the whole page |
+| ⌘⌫ | Delete the page (⌘D confirms) |
+| ⌘[ / ⌘] | Previous / next page |
+| ⇧⌘F | Search all pages |
+| ⌘F | Find in this page |
+| ⌘+ / ⌘− / ⌘0 | Bigger / smaller / default text size |
+| ⌃⌘S | Show or hide the page list |
+| ⌘, | Settings |
+| ⌘W | Close the window (Esc too, when it isn't pinned) |
+
+## Settings
+
+Click the cog or press ⌘, to open Settings.
+
+- **General:** launch at login, light or dark appearance, text size and window size.
+- **Keyboard:** change or turn off the ⌃⌥⌘N shortcut.
+- **iCloud:** sync pages between your Macs.
+- **Backups:** see earlier versions of any page and restore one. This includes pages you've deleted.
+
+<p align="center"><img src="docs/images/settings.png" alt="The Settings window's General tab" width="540"></p>
+
+## Your pages
+
+Each page is an ordinary text file, so you can always get at your text without
+Scratchbar.
+
+- **On this Mac:** `~/Library/Application Support/Scratchbar/Pages/`
+- **With iCloud sync on:** iCloud Drive › Scratchbar
+
+If iCloud isn't available, Scratchbar keeps saving on your Mac and catches up later. A
+warning on the menu bar icon tells you while it's waiting. Backups stay on your Mac
+and are kept for 30 days after a page is deleted.
+
+## Automation
+
+Make a page from a script, Shortcuts or another app:
+
+```bash
 open "scratchbar://new?text=Hello%20world"        # new page, window opens on it
 open -g "scratchbar://new?text=Hello%20world&hide"  # new page, window stays closed
 ```
 
-Text must be URL-encoded and at most 1 MB.
+The text must be URL-encoded and is limited to 1 MB.
 
-## Where things live
-
-| What | Where |
-|---|---|
-| Pages (sync off) | `~/Library/Application Support/Scratchbar/Pages/` |
-| Pages (sync on) | iCloud Drive › Scratchbar |
-| Saved here while iCloud is unavailable | `~/Library/Application Support/Scratchbar/Pending/` |
-| Backups (never synced) | `~/Library/Application Support/Scratchbar/Backups/` |
-
-Each page is an ordinary UTF-8 `.txt` file, so you can read it with any editor.
-
-If iCloud Drive can't be written, pages are saved on this Mac instead; the menu bar icon
-shows a warning until they've been moved into iCloud (retried every minute and on wake).
-
-## Building
-
-Requires Xcode (Swift 6) on macOS 14 or later.
+## Development
 
 ```bash
-swift test                    # core tests
-scripts/make-app.sh           # build/Scratchbar.app, signed with Developer ID
-scripts/make-app.sh --install # also copy to /Applications
+swift test              # run the tests
+scripts/make-app.sh     # build build/Scratchbar.app
 ```
 
-Set `SIGN_ID` to sign with a different identity.
-
-## Memory
-
-Measured with `footprint` on macOS 27.2 (Apple Silicon), 2026-11-19:
-
-| State | Footprint |
-|---|---|
-| Just launched, window closed | 16 MB |
-| Window open | 24 MB |
-| After adding 10 more pages | 24 MB |
-| After opening Settings (stays there until quit) | 34–35 MB |
-
-Opening Settings once costs about 13 MB that is kept until you quit: the window
-itself is freed when it closes, but AppKit keeps the toolbar, table and popup
-code it loaded, and malloc keeps the freed pages around the objects still in use.
-Opening it again doesn't add more.
-| Window closed again | 25 MB |
-| Reminders MenuBar, same Mac, same time (for comparison) | 100 MB |
+For demos and testing, `open build/Scratchbar.app --args -dataFolder ~/some/folder`
+runs Scratchbar on a separate folder, leaving your own pages alone.
 
 ## Licence
 
