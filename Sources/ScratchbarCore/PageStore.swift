@@ -1,0 +1,148 @@
+import Foundation
+
+public enum PageStoreError: Error, Equatable {
+    case coordination(NSError)
+    /// iCloud hasn't downloaded the file yet (a download has been requested).
+    case notDownloaded
+}
+
+/// What the UI needs from page storage. `PageStore` is one folder;
+/// later a repository combines the sync folder with a local fallback.
+public protocol PageStoring: AnyObject {
+    func list() throws -> [Page]
+    func read(_ id: String) throws -> String
+    func write(_ id: String, text: String) throws
+    func delete(_ id: String) throws
+    func remove(_ id: String) throws
+}
+
+/// A folder of plain-text pages: one `<id>.txt` file per page.
+/// Reads and writes go through `NSFileCoordinator`; writes are atomic.
+public final class PageStore: PageStoring {
+    public let folder: URL
+    public let location: PageLocation
+    private let trash: (URL) throws -> Void
+    private let isDownloaded: (URL) -> Bool
+
+    /// Bytes read from each file to build its sidebar title.
+    static let titlePrefixBytes = 8 * 1024
+
+    public init(folder: URL,
+                location: PageLocation = .primary,
+                trash: @escaping (URL) throws -> Void = PageStore.moveToTrash,
+                isDownloaded: @escaping (URL) -> Bool = PageStore.isDownloaded) {
+        self.folder = folder
+        self.location = location
+        self.trash = trash
+        self.isDownloaded = isDownloaded
+    }
+
+    /// False for an iCloud file whose contents aren't on this Mac yet. Reading
+    /// one would block while it downloads, so callers show "Downloading…".
+    public static func isDownloaded(_ url: URL) -> Bool {
+        let status = (try? url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey]))?
+            .ubiquitousItemDownloadingStatus
+        return status != .notDownloaded
+    }
+
+    public static func moveToTrash(_ url: URL) throws {
+        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+    }
+
+    public static func newID() -> String { UUID().uuidString }
+
+    public func url(for id: String) -> URL {
+        folder.appendingPathComponent(id).appendingPathExtension(PageKind.text.rawValue)
+    }
+
+    /// All pages in the folder, newest modification first. A missing folder is empty.
+    public func list() throws -> [Page] {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: folder.path) else { return [] }
+        let urls = try fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])
+        var pages: [Page] = []
+        var placeholders: [Page] = []
+        for url in urls {
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantPast
+            let name = url.lastPathComponent
+            if let id = placeholderID(fileName: name) {
+                // iCloud hasn't downloaded this page yet: ask for it.
+                try? fm.startDownloadingUbiquitousItem(at: self.url(for: id))
+                placeholders.append(Page(id: id, modified: modified, title: "Downloading…",
+                                         location: location, isDownloading: true))
+            } else if !name.hasPrefix("."), url.pathExtension == PageKind.text.rawValue, !isDownloaded(url) {
+                try? fm.startDownloadingUbiquitousItem(at: url)
+                placeholders.append(Page(id: url.deletingPathExtension().lastPathComponent, modified: modified,
+                                         title: "Downloading…", location: location, isDownloading: true))
+            } else if !name.hasPrefix("."), url.pathExtension == PageKind.text.rawValue {
+                pages.append(Page(id: url.deletingPathExtension().lastPathComponent, modified: modified,
+                                  title: pageTitle(for: readTitlePrefix(url)), location: location))
+            }
+        }
+        let real = Set(pages.map(\.id))
+        pages += placeholders.filter { !real.contains($0.id) }
+        return pages.sorted { $0.modified > $1.modified }
+    }
+
+    public func read(_ id: String) throws -> String {
+        guard isDownloaded(url(for: id)) else {
+            try? FileManager.default.startDownloadingUbiquitousItem(at: url(for: id))
+            throw PageStoreError.notDownloaded
+        }
+        var result: Result<Data, Error> = .success(Data())
+        try coordinate(reading: url(for: id)) { url in
+            result = Result { try Data(contentsOf: url) }
+        }
+        return decodeText(try result.get())
+    }
+
+    /// Writes the page atomically, creating the folder if needed.
+    public func write(_ id: String, text: String) throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var result: Result<Void, Error> = .success(())
+        try coordinate(writing: url(for: id), options: .forReplacing) { url in
+            result = Result { try Data(text.utf8).write(to: url, options: .atomic) }
+        }
+        try result.get()
+    }
+
+    /// Deletes a page by handing it to `trash` (the macOS Trash by default).
+    public func delete(_ id: String) throws {
+        var result: Result<Void, Error> = .success(())
+        try coordinate(writing: url(for: id), options: .forDeleting) { url in
+            result = Result { try self.trash(url) }
+        }
+        try result.get()
+    }
+
+    /// Removes a page's file outright (used for discarding empty pages).
+    public func remove(_ id: String) throws {
+        var result: Result<Void, Error> = .success(())
+        try coordinate(writing: url(for: id), options: .forDeleting) { url in
+            result = Result { try FileManager.default.removeItem(at: url) }
+        }
+        try result.get()
+    }
+
+    // MARK: - Helpers
+
+    private func readTitlePrefix(_ url: URL) -> String {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
+        defer { try? handle.close() }
+        let data = (try? handle.read(upToCount: Self.titlePrefixBytes)) ?? Data()
+        return decodePrefix(data, truncated: data.count == Self.titlePrefixBytes)
+    }
+
+    private func coordinate(reading url: URL, _ body: (URL) -> Void) throws {
+        var error: NSError?
+        NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: url, options: [], error: &error, byAccessor: body)
+        if let error { throw PageStoreError.coordination(error as NSError) }
+    }
+
+    private func coordinate(writing url: URL, options: NSFileCoordinator.WritingOptions, _ body: (URL) -> Void) throws {
+        var error: NSError?
+        NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: url, options: options, error: &error, byAccessor: body)
+        if let error { throw PageStoreError.coordination(error as NSError) }
+    }
+}
