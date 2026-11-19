@@ -12,12 +12,15 @@ private final class SimpleList: NSScrollView, NSTableViewDataSource, NSTableView
         super.init(frame: .zero)
         let column = NSTableColumn(identifier: .init("c"))
         column.title = label
+        column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
+        table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         table.dataSource = self
         table.delegate = self
         table.style = .inset
         documentView = table
         hasVerticalScroller = true
+        autohidesScrollers = true
         borderType = .bezelBorder
     }
 
@@ -68,6 +71,7 @@ final class BackupsSettings: NSViewController {
         let previewScroll = NSScrollView()
         previewScroll.documentView = preview
         previewScroll.hasVerticalScroller = true
+        previewScroll.autohidesScrollers = true
         previewScroll.borderType = .bezelBorder
         preview.isEditable = false
         preview.isRichText = false

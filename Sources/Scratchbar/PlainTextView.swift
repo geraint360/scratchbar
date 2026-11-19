@@ -17,6 +17,7 @@ final class PlainTextView: NSTextView {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         scroll.documentView = textView
         scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
         textView.configure()

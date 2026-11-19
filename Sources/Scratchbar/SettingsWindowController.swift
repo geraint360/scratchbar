@@ -37,6 +37,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
         window.delegate = self
         tabs.fitWindow(animated: false)
+        window.title = "General"
         window.center()
     }
 

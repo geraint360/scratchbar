@@ -112,6 +112,7 @@ final class KeyboardSettings: NSViewController {
     private let recorder = ShortcutRecorderField()
     private let restoreButton = NSButton(title: "Restore default", target: nil, action: nil)
     private let errorLabel = NSTextField(labelWithString: "")
+    private var errorRow: NSGridRow?
 
     init(app: AppDelegate) {
         self.app = app
@@ -134,27 +135,25 @@ final class KeyboardSettings: NSViewController {
         let recorderRow = NSStackView(views: [recorder, restoreButton])
         recorderRow.spacing = 12
 
-        let shortcuts = NSGridView(views: [
+        let shortcuts: [(String, String)] = [
             ("⌘N", "New page"), ("⇧⌘C", "Copy page"), ("⌘⌫", "Delete page"),
             ("⌘F", "Find"), ("⌘+  ⌘−  ⌘0", "Text size"), ("⌘,", "Settings"), ("Esc  ⌘W", "Close the window"),
-        ].map { keys, action in
-            let k = NSTextField(labelWithString: keys)
-            k.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
-            k.textColor = .secondaryLabelColor
-            let a = NSTextField(labelWithString: action)
-            a.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-            return [k, a]
-        })
-        shortcuts.rowSpacing = 4
-        shortcuts.columnSpacing = 12
+        ]
 
         let form = SettingsForm()
         form.row("Global shortcut", enableBox)
         form.row(nil, recorderRow)
-        form.row(nil, errorLabel)
+        errorRow = form.grid.addRow(with: [NSGridCell.emptyContentView, errorLabel])
         form.note("Press it, start typing: the text goes straight into a new page. Press it again to close the window.")
         form.divider()
-        form.row("In Scratchbar", shortcuts)
+        for (index, (keys, action)) in shortcuts.enumerated() {
+            let k = NSTextField(labelWithString: keys)
+            k.textColor = .secondaryLabelColor
+            k.widthAnchor.constraint(equalToConstant: 110).isActive = true
+            let row = NSStackView(views: [k, NSTextField(labelWithString: action)])
+            row.spacing = 8
+            form.row(index == 0 ? "In Scratchbar" : nil, row)
+        }
         view = form.view()
     }
 
@@ -163,7 +162,7 @@ final class KeyboardSettings: NSViewController {
         let settings = HotKeySettings.load(.standard)
         enableBox.state = settings.enabled ? .on : .off
         recorder.combo = settings.combo
-        errorLabel.stringValue = ""
+        showError(nil)
         refreshEnabled()
     }
 
@@ -181,7 +180,12 @@ final class KeyboardSettings: NSViewController {
     @objc private func changed() {
         refreshEnabled()
         let ok = app.applyHotKey(enabled: enableBox.state == .on, combo: recorder.combo)
-        errorLabel.stringValue = ok ? "" : "That shortcut is in use by another app."
+        showError(ok ? nil : "That shortcut is in use by another app.")
+    }
+
+    private func showError(_ message: String?) {
+        errorLabel.stringValue = message ?? ""
+        errorRow?.isHidden = message == nil
     }
 
     @objc private func restoreDefault() {
@@ -258,7 +262,9 @@ final class AboutSettings: NSViewController {
     required init?(coder: NSCoder) { fatalError("not used") }
 
     override func loadView() {
-        let icon = NSImageView(image: NSApp.applicationIconImage)
+        let icon = NSImageView(image: NSImage(systemSymbolName: "note.text", accessibilityDescription: nil)!
+            .withSymbolConfiguration(.init(pointSize: 64, weight: .light))!)
+        icon.contentTintColor = Theme.accent
         icon.translatesAutoresizingMaskIntoConstraints = false
         icon.widthAnchor.constraint(equalToConstant: 96).isActive = true
         icon.heightAnchor.constraint(equalToConstant: 96).isActive = true
