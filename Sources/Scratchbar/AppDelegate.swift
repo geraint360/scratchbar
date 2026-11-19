@@ -43,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.didDiscard = { [unowned self] id in backups.markDeleted(id: id) }
         main.resolveVersionConflicts = { [unowned self] id in resolveVersionConflicts(id: id) }
         main.willDelete = { [unowned self] id, text in
-            backups.backup(id: id, text: text, reason: .beforeDelete)
+            if !text.isEmpty { backups.backup(id: id, text: text, reason: .beforeDelete) }
             backups.markDeleted(id: id)
         }
         panelController = PanelController(content: main)

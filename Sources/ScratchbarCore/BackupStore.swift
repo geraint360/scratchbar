@@ -30,7 +30,7 @@ public final class BackupStore {
         self.now = now
     }
 
-    /// Backs up regardless of timing (but never duplicates the newest backup).
+    /// Saves a backup (unless it matches the newest one), then prunes old ones.
     public func backup(id: String, text: String, reason: BackupReason) {
         if let newest = versions(id: id, limit: 1).first, newest.text == text { return }
         let dir = pageFolder(id)

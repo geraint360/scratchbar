@@ -15,7 +15,7 @@ weeks, without opening an editor, naming a file or remembering to save.
 - **Named for you.** Each page takes its name from its first line.
 - **Search everything.** Find text across every page, with matches highlighted.
 - **Optional iCloud sync** between your Macs, plus local backups of every page.
-- **Light.** About 16 MB of memory when idle.
+- **Light.** About 16 MB of memory at launch, and around 25 MB once you've used it.
 
 ## Install
 

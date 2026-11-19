@@ -1,9 +1,5 @@
 import AppKit
 
-if CommandLine.arguments.contains("--probe-icloud") {
-    exit(ICloudProbe.run())
-}
-
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

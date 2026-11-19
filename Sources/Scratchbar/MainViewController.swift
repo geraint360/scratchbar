@@ -776,9 +776,14 @@ final class MainViewController: NSViewController, NSTextViewDelegate, NSSearchFi
     }
 
     @objc func copyPage(_ sender: Any?) {
+        // Never copy a message shown in place of the page (downloading etc.).
+        guard let id = currentID, let text = text(of: id) else {
+            NSSound.beep()
+            return
+        }
         let pb = NSPasteboard.general
         pb.clearContents()
-        pb.setString(currentText, forType: .string)
+        pb.setString(text, forType: .string)
         copyButton.image = Self.symbol("checkmark", "Copied")
         copyButton.contentTintColor = Theme.accent
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
@@ -827,7 +832,8 @@ final class MainViewController: NSViewController, NSTextViewDelegate, NSSearchFi
     }
 
     private func performDelete(id: String) {
-        let text = currentText
+        // Nil while the editor shows a message (e.g. still downloading): nothing to back up.
+        let text = text(of: id) ?? ""
         scheduler.flush()
         willDelete(id, text)
         if scheduler.knownOnDisk.contains(id) {
@@ -870,7 +876,7 @@ final class MainViewController: NSViewController, NSTextViewDelegate, NSSearchFi
 }
 
 extension MainViewController {
-    /// Return in the search field opens the first match; ↓ moves into the list.
+    /// Return in the search field opens the first match.
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         guard control === searchField, selector == #selector(NSResponder.insertNewline(_:)) else { return false }
         if let first = list.pages.first, !list.pages.contains(where: { $0.id == currentID }) {
