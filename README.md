@@ -79,3 +79,7 @@ code it loaded, and malloc keeps the freed pages around the objects still in use
 Opening it again doesn't add more.
 | Window closed again | 25 MB |
 | Reminders MenuBar, same Mac, same time (for comparison) | 100 MB |
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).
