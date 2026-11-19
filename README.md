@@ -19,8 +19,22 @@ weeks, without opening an editor, naming a file or remembering to save.
 
 ## Install
 
-Scratchbar needs macOS 14 or later. There's no download yet, so build it from source
-(you'll need Xcode):
+Scratchbar needs macOS 14 or later.
+
+1. Download **Scratchbar-x.y.z.zip** from the
+   [latest release](https://github.com/geraint360/scratchbar/releases/latest).
+2. Open the zip and drag **Scratchbar** into your Applications folder.
+3. Open it. Its icon appears in the menu bar.
+
+Scratchbar is signed and notarised by Apple, so it opens without warnings. It starts
+automatically when you log in; you can turn that off in Settings.
+
+To update, quit Scratchbar (right-click the icon, then Quit) and replace it with the
+new version. Your pages aren't touched.
+
+### Building from source
+
+You'll need Xcode.
 
 ```bash
 git clone https://github.com/geraint360/scratchbar.git
@@ -28,11 +42,7 @@ cd scratchbar
 SIGN_ID=- scripts/make-app.sh --install
 ```
 
-This puts Scratchbar in your Applications folder. `SIGN_ID=-` signs it for your own Mac
-only; set it to your Developer ID to sign it for sharing.
-
-Open Scratchbar and its icon appears in the menu bar. It starts automatically when you
-log in; you can turn that off in Settings.
+`SIGN_ID=-` signs it for your own Mac only.
 
 ## Using it
 
@@ -117,6 +127,11 @@ The text must be URL-encoded and is limited to 1 MB.
 swift test              # run the tests
 scripts/make-app.sh     # build build/Scratchbar.app
 ```
+
+To make a release, bump the version in `Resources/Info.plist` and run
+`scripts/release.sh --publish`. It builds, notarises and staples the app, then
+uploads the zip to a new GitHub release. The script explains the one-time
+notarisation setup.
 
 For demos and testing, `open build/Scratchbar.app --args -dataFolder ~/some/folder`
 runs Scratchbar on a separate folder, leaving your own pages alone.

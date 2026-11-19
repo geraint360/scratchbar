@@ -14,7 +14,10 @@ mkdir -p "$APP/Contents/MacOS"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp "$BIN" "$APP/Contents/MacOS/Scratchbar"
 
-codesign --force --options runtime --timestamp=none --sign "$SIGN_ID" "$APP"
+# Notarisation needs a secure timestamp; everyday builds skip it (it needs the network).
+TIMESTAMP=--timestamp=none
+[[ -n "${RELEASE:-}" ]] && TIMESTAMP=--timestamp
+codesign --force --options runtime "$TIMESTAMP" --sign "$SIGN_ID" "$APP"
 codesign --verify --strict --verbose=1 "$APP"
 echo "Built $APP"
 
