@@ -19,7 +19,7 @@ weeks, without opening an editor, naming a file or remembering to save.
 
 ## Install
 
-Scratchbar needs macOS 14 or later.
+Scratchbar needs a Mac with Apple silicon and macOS 14 or later.
 
 1. Download **Scratchbar-x.y.z.zip** from the
    [latest release](https://github.com/geraint360/scratchbar/releases/latest).
