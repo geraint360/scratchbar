@@ -7,6 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var main: MainViewController!
     private let hotKeys = HotKeyCenter()
     private var shortcutSheet: ShortcutSheet?
+    private var backupsSheet: BackupsSheet?
+    private(set) var backups: BackupStore!
 
     static var appSupport: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -16,12 +18,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let store = PageStore(folder: Self.appSupport.appendingPathComponent("Pages", isDirectory: true))
         main = MainViewController(store: store)
+        backups = BackupStore(folder: Self.appSupport.appendingPathComponent("Backups", isDirectory: true))
+        backups.prune()
+        main.onSaved = { [unowned self] id, text in backups.backupIfDue(id: id, text: text) }
+        main.willDelete = { [unowned self] id, text in
+            backups.backup(id: id, text: text, reason: .beforeDelete)
+            backups.markDeleted(id: id)
+        }
         panelController = PanelController(content: main)
         statusItemController = StatusItemController()
 
         main.menuProvider = { [unowned self] in SettingsMenu.build(target: self) }
         statusItemController.menuProvider = { [unowned self] in SettingsMenu.build(target: self) }
         statusItemController.onLeftClick = { [unowned self] in panelController.toggle() }
+        panelController.didHide = { [unowned self] in backupCurrentPage() }
         panelController.anchorFrame = { [unowned self] in statusItemController.buttonScreenFrame }
 
         NSApp.mainMenu = buildMainMenu()
@@ -54,6 +64,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hotKey = HotKeySettings.load(.standard)
         let title = "Global Shortcut…" + (hotKey.enabled ? hotKey.combo.map { "  \($0.displayString)" } ?? "" : "")
         menu.addItem(SettingsMenu.item(title, #selector(showShortcutSheet(_:)), self))
+        menu.addItem(SettingsMenu.item("Backups…", #selector(showBackups(_:)), self))
+    }
+
+    // MARK: - Backups
+
+    /// Taken whenever the window hides (after saving).
+    private func backupCurrentPage() {
+        guard let id = main.currentID, main.scheduler.knownOnDisk.contains(id) else { return }
+        backups.backup(id: id, text: main.currentText, reason: .periodic)
+    }
+
+    @objc func showBackups(_ sender: Any?) {
+        if !panelController.isVisible { panelController.show(newPage: false) }
+        let sheet = BackupsSheet(backups: backups) { [unowned self] id, text in
+            if let current = try? main.store.read(id) {
+                backups.backup(id: id, text: current, reason: .beforeRestore)
+            }
+            backups.unmarkDeleted(id: id)
+            main.restorePage(id: id, text: text)
+        }
+        backupsSheet = sheet
+        sheet.begin(on: panelController.panel)
     }
 
     // MARK: - Global hotkey

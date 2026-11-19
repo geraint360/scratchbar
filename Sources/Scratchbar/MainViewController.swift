@@ -261,6 +261,24 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
         list.show(pages, selectedID: nil)
     }
 
+    /// Writes `text` as page `id` (restoring a backup) and shows it.
+    func restorePage(id: String, text: String) {
+        scheduler.flush()
+        do {
+            try store.write(id, text: text)
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.messageText = "Couldn't restore this page."
+            if let window = view.window { alert.beginSheetModal(for: window) }
+            return
+        }
+        if currentID != id { leaveCurrentPage() }
+        currentID = nil
+        reloadList()
+        load(id: id)
+        focusEditor()
+    }
+
     /// Called when the window hides: save, and drop an empty page.
     func willHide() {
         leaveCurrentPage()
