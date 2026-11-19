@@ -1,3 +1,5 @@
+<img src="docs/images/icon.png" alt="" width="96" align="right">
+
 # Scratchbar
 
 A plain-text scratchpad that lives in your Mac's menu bar.
