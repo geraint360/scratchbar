@@ -4,9 +4,19 @@ public enum PageStoreError: Error {
     case coordination(Error)
 }
 
+/// What the UI needs from page storage. `PageStore` is one folder;
+/// later a repository combines the sync folder with a local fallback.
+public protocol PageStoring: AnyObject {
+    func list() throws -> [Page]
+    func read(_ id: String) throws -> String
+    func write(_ id: String, text: String) throws
+    func delete(_ id: String) throws
+    func remove(_ id: String) throws
+}
+
 /// A folder of plain-text pages: one `<id>.txt` file per page.
 /// Reads and writes go through `NSFileCoordinator`; writes are atomic.
-public final class PageStore {
+public final class PageStore: PageStoring {
     public let folder: URL
     public let location: PageLocation
     private let trash: (URL) throws -> Void
