@@ -17,56 +17,45 @@ final class BackupStoreTests: XCTestCase {
         BackupStore(folder: folder, now: { [unowned self] in now })
     }
 
-    func testBackupIfDueRespects10Minutes() {
+    func testBackupKeepsOnlyNewestFiveAsItSaves() {
         let store = makeStore()
-        store.backupIfDue(id: "p", text: "v1")
-        now += 599
-        store.backupIfDue(id: "p", text: "v2")
-        XCTAssertEqual(store.versions(id: "p").map(\.text), ["v1"])
-        now += 1
-        store.backupIfDue(id: "p", text: "v3")
-        XCTAssertEqual(store.versions(id: "p").map(\.text), ["v3", "v1"])
+        for i in 1...7 {
+            store.backup(id: "p", text: "v\(i)", reason: .beforeRestore)
+            now += 1
+        }
+        // No prune() call: the limit holds as backups are saved.
+        XCTAssertEqual(store.versions(id: "p").map(\.text), ["v7", "v6", "v5", "v4", "v3"])
     }
 
-    func testExplicitBackupIgnoresInterval() {
+    func testSavingABackupExpiresPagesDeletedOver30DaysAgo() {
         let store = makeStore()
-        store.backupIfDue(id: "p", text: "v1")
-        now += 5
-        store.backup(id: "p", text: "v2", reason: .beforeDelete)
-        XCTAssertEqual(store.versions(id: "p").map(\.text), ["v2", "v1"])
+        store.backup(id: "gone", text: "bye", reason: .beforeDelete)
+        store.markDeleted(id: "gone")
+        now += 29 * 86_400
+        store.backup(id: "other", text: "x", reason: .beforeDelete)
+        XCTAssertEqual(store.versions(id: "gone").count, 1)
+        now += 2 * 86_400
+        store.backup(id: "other", text: "y", reason: .beforeDelete)
+        XCTAssertEqual(store.versions(id: "gone").count, 0)
     }
 
     func testIdenticalTextNotDuplicated() {
         let store = makeStore()
-        store.backup(id: "p", text: "same", reason: .periodic)
+        store.backup(id: "p", text: "same", reason: .beforeRestore)
         now += 1000
         store.backup(id: "p", text: "same", reason: .beforeDelete)
-        store.backupIfDue(id: "p", text: "same")
         XCTAssertEqual(store.versions(id: "p").count, 1)
     }
 
     func testVersionsNewestFirst() {
         let store = makeStore()
         for i in 1...3 {
-            store.backup(id: "p", text: "v\(i)", reason: .periodic)
+            store.backup(id: "p", text: "v\(i)", reason: .beforeRestore)
             now += 60
         }
         let versions = store.versions(id: "p")
         XCTAssertEqual(versions.map(\.text), ["v3", "v2", "v1"])
         XCTAssertEqual(versions.first?.date, Date(timeIntervalSince1970: 1_800_000_120))
-    }
-
-    func testPruneKeepsNewest20() {
-        let store = makeStore()
-        for i in 1...25 {
-            store.backup(id: "p", text: "v\(i)", reason: .periodic)
-            now += 1
-        }
-        store.prune()
-        let texts = store.versions(id: "p").map(\.text)
-        XCTAssertEqual(texts.count, 20)
-        XCTAssertEqual(texts.first, "v25")
-        XCTAssertEqual(texts.last, "v6")
     }
 
     func testDeletedPagePrunedAfter30Days() {
@@ -83,7 +72,7 @@ final class BackupStoreTests: XCTestCase {
 
     func testPagesWithBackupsShowsTitlesAndDeleted() {
         let store = makeStore()
-        store.backup(id: "a", text: "Alpha\nmore", reason: .periodic)
+        store.backup(id: "a", text: "Alpha\nmore", reason: .beforeRestore)
         store.backup(id: "b", text: "Beta", reason: .beforeDelete)
         store.markDeleted(id: "b")
         let pages = Dictionary(uniqueKeysWithValues: store.pagesWithBackups().map { ($0.id, $0) })

@@ -1,7 +1,7 @@
 import Foundation
 
 public enum BackupReason: Sendable {
-    case periodic, beforeDelete, beforeConflict, beforeRestore, beforeSync, remoteDelete
+    case beforeDelete, beforeConflict, beforeRestore, beforeSync, remoteDelete
 }
 
 public struct BackupVersion: Equatable, Sendable {
@@ -12,9 +12,13 @@ public struct BackupVersion: Equatable, Sendable {
 
 /// Local, never-synced backups: `<folder>/<page-id>/<milliseconds>.txt`.
 /// A `.deleted` file in a page's folder records when the page was deleted.
+///
+/// A backup is taken only just before a page's text is replaced or removed
+/// (delete, emptying, restore, sync conflict, sync on/off). Each save keeps
+/// the newest 5 per page and drops pages deleted over 30 days ago, so the
+/// folder never grows however long Scratchbar runs.
 public final class BackupStore {
-    public static let interval: TimeInterval = 10 * 60
-    public static let keepPerPage = 20
+    public static let keepPerPage = 5
     public static let keepDeletedFor: TimeInterval = 30 * 86_400
 
     public let folder: URL
@@ -42,12 +46,7 @@ public final class BackupStore {
         } catch {
             NSLog("Scratchbar: backup of \(id) failed: \(error)")
         }
-    }
-
-    /// Backs up only if the newest backup is at least 10 minutes old (or none).
-    public func backupIfDue(id: String, text: String) {
-        if let newest = backupDates(id: id).first, now().timeIntervalSince(newest) < Self.interval { return }
-        backup(id: id, text: text, reason: .periodic)
+        prune()
     }
 
     public func markDeleted(id: String) {
@@ -76,7 +75,7 @@ public final class BackupStore {
         .sorted { $0.newest > $1.newest }
     }
 
-    /// Keeps the newest 20 backups per page and forgets pages deleted over 30 days ago.
+    /// Keeps the newest 5 backups per page and forgets pages deleted over 30 days ago.
     public func prune() {
         let dirs = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
         for dir in dirs {
@@ -112,10 +111,6 @@ public final class BackupStore {
 
     private func date(of url: URL) -> Date {
         Date(timeIntervalSince1970: TimeInterval(Int64(url.deletingPathExtension().lastPathComponent) ?? 0) / 1000)
-    }
-
-    private func backupDates(id: String) -> [Date] {
-        backupFiles(id: id).map(date(of:))
     }
 
     private func versions(id: String, limit: Int?) -> [BackupVersion] {

@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let locations = StorageLocations(appSupport: AppDelegate.appSupport, iCloudRoot: StorageLocations.defaultICloudRoot)
     private(set) var repository: PageRepository!
     private var retryTimer: Timer?
+    private var pruneTimer: Timer?
     private var watcher: FolderWatcher?
 
     /// `open Scratchbar.app --args -dataFolder /some/folder` uses another folder
@@ -29,8 +30,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         repository = makeRepository(syncEnabled: UserDefaults.standard.bool(forKey: DefaultsKey.syncEnabled))
         main = MainViewController(store: repository)
         backups.prune()
-        main.onSaved = { [unowned self] id, text in
-            backups.backupIfDue(id: id, text: text)
+        // Backups also tidy themselves on every save; this covers deleted
+        // pages' 30 days running out while nothing is being backed up.
+        pruneTimer = Timer.scheduledTimer(withTimeInterval: 86_400, repeats: true) { [weak self] _ in
+            self?.backups.prune()
+        }
+        pruneTimer?.tolerance = 3_600
+        main.onSaved = { [unowned self] _, _ in
             refreshSyncStatus()
         }
         main.backup = { [unowned self] id, text, reason in backups.backup(id: id, text: text, reason: reason) }
@@ -47,7 +53,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemController.menuProvider = { [unowned self] in statusMenu() }
         panelController.keepsOpen = { [unowned self] in settings?.window?.isVisible == true }
         statusItemController.onLeftClick = { [unowned self] in panelController.toggle() }
-        panelController.didHide = { [unowned self] in backupCurrentPage() }
         panelController.willShow = { [unowned self] in watcher?.scheduleScan() }
         panelController.anchorFrame = { [unowned self] in statusItemController.buttonScreenFrame }
 
@@ -128,6 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func didWake(_ notification: Notification) {
         retryPendingSync()
+        backups.prune()
     }
 
     // MARK: - iCloud sync
@@ -258,12 +264,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Backups
-
-    /// Taken whenever the window hides (after saving).
-    private func backupCurrentPage() {
-        guard let id = main.currentID, main.scheduler.knownOnDisk.contains(id) else { return }
-        backups.backup(id: id, text: main.currentText, reason: .periodic)
-    }
 
     /// Settings › Backups › Restore.
     func restoreBackup(id: String, text: String) {
