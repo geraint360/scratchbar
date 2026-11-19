@@ -12,12 +12,15 @@ private final class SimpleList: NSScrollView, NSTableViewDataSource, NSTableView
         super.init(frame: .zero)
         let column = NSTableColumn(identifier: .init("c"))
         column.title = label
+        column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
+        table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         table.dataSource = self
         table.delegate = self
         table.style = .inset
         documentView = table
         hasVerticalScroller = true
+        autohidesScrollers = true
         borderType = .bezelBorder
     }
 
@@ -37,10 +40,9 @@ private final class SimpleList: NSScrollView, NSTableViewDataSource, NSTableView
     }
 }
 
-/// "Backups…": pick a page (including deleted ones), pick a version, preview it, Restore.
-final class BackupsSheet: NSWindowController {
-    private let backups: BackupStore
-    private let restore: (String, String) -> Void
+/// Settings › Backups: pick a page (including deleted ones), pick a version, preview it, Restore.
+final class BackupsSettings: NSViewController {
+    private unowned let app: AppDelegate
 
     private let pageList = SimpleList(label: "Page")
     private let versionList = SimpleList(label: "Saved")
@@ -58,17 +60,18 @@ final class BackupsSheet: NSWindowController {
         return f
     }()
 
-    /// `restore(id, text)` writes the text back as that page.
-    init(backups: BackupStore, restore: @escaping (String, String) -> Void) {
-        self.backups = backups
-        self.restore = restore
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 400),
-                              styleMask: [.titled, .resizable], backing: .buffered, defer: true)
-        super.init(window: window)
+    init(app: AppDelegate) {
+        self.app = app
+        super.init(nibName: nil, bundle: nil)
+    }
 
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func loadView() {
         let previewScroll = NSScrollView()
         previewScroll.documentView = preview
         previewScroll.hasVerticalScroller = true
+        previewScroll.autohidesScrollers = true
         previewScroll.borderType = .bezelBorder
         preview.isEditable = false
         preview.isRichText = false
@@ -81,50 +84,42 @@ final class BackupsSheet: NSWindowController {
         restoreButton.action = #selector(restoreSelected)
         restoreButton.isEnabled = false
         restoreButton.bezelStyle = .rounded
-        let close = NSButton(title: "Close", target: self, action: #selector(closeSheet))
-        close.keyEquivalent = "\u{1b}"
-        close.bezelStyle = .rounded
-
         let content = NSView()
-        for v in [pageList, versionList, previewScroll, restoreButton, close] as [NSView] {
+        for v in [pageList, versionList, previewScroll, restoreButton] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(v)
         }
         NSLayoutConstraint.activate([
             pageList.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             pageList.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
-            pageList.widthAnchor.constraint(equalToConstant: 190),
-            pageList.bottomAnchor.constraint(equalTo: close.topAnchor, constant: -12),
+            pageList.widthAnchor.constraint(equalToConstant: 180),
+            pageList.heightAnchor.constraint(equalToConstant: 280),
+            pageList.bottomAnchor.constraint(equalTo: restoreButton.topAnchor, constant: -12),
             versionList.leadingAnchor.constraint(equalTo: pageList.trailingAnchor, constant: 10),
             versionList.topAnchor.constraint(equalTo: pageList.topAnchor),
-            versionList.widthAnchor.constraint(equalToConstant: 150),
+            versionList.widthAnchor.constraint(equalToConstant: 140),
             versionList.bottomAnchor.constraint(equalTo: pageList.bottomAnchor),
             previewScroll.leadingAnchor.constraint(equalTo: versionList.trailingAnchor, constant: 10),
             previewScroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
             previewScroll.topAnchor.constraint(equalTo: pageList.topAnchor),
             previewScroll.bottomAnchor.constraint(equalTo: pageList.bottomAnchor),
-            close.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
-            close.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
-            restoreButton.trailingAnchor.constraint(equalTo: close.leadingAnchor, constant: -8),
-            restoreButton.centerYAnchor.constraint(equalTo: close.centerYAnchor),
+            restoreButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            restoreButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
+            content.widthAnchor.constraint(equalToConstant: 600),
         ])
-        window.contentView = content
-        window.contentMinSize = NSSize(width: 560, height: 300)
+        view = content
 
         pageList.onSelect = { [weak self] row in self?.showVersions(row) }
         versionList.onSelect = { [weak self] row in self?.showPreview(row) }
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
         reloadPages()
     }
 
-    required init?(coder: NSCoder) { fatalError("not used") }
-
-    func begin(on parent: NSWindow) {
-        guard let window else { return }
-        parent.beginSheet(window)
-    }
-
     private func reloadPages() {
-        pages = backups.pagesWithBackups()
+        pages = app.backups.pagesWithBackups()
         pageList.items = pages.map { $0.deleted ? "\($0.title) — Deleted" : $0.title }
         pageList.secondary = Set(pages.indices.filter { pages[$0].deleted })
         versions = []
@@ -134,7 +129,7 @@ final class BackupsSheet: NSWindowController {
     }
 
     private func showVersions(_ row: Int) {
-        versions = backups.versions(id: pages[row].id)
+        versions = app.backups.versions(id: pages[row].id)
         versionList.items = versions.map { Self.dateFormatter.string(from: $0.date) }
         preview.string = ""
         restoreButton.isEnabled = false
@@ -151,12 +146,7 @@ final class BackupsSheet: NSWindowController {
     @objc private func restoreSelected() {
         let pageRow = pageList.table.selectedRow, versionRow = versionList.table.selectedRow
         guard pages.indices.contains(pageRow), versions.indices.contains(versionRow) else { return }
-        restore(pages[pageRow].id, versions[versionRow].text)
-        closeSheet()
-    }
-
-    @objc private func closeSheet() {
-        guard let window, let parent = window.sheetParent else { return }
-        parent.endSheet(window)
+        app.restoreBackup(id: pages[pageRow].id, text: versions[versionRow].text)
+        reloadPages()
     }
 }

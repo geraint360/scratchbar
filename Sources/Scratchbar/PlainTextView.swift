@@ -17,6 +17,7 @@ final class PlainTextView: NSTextView {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         scroll.documentView = textView
         scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
         textView.configure()
@@ -40,6 +41,9 @@ final class PlainTextView: NSTextView {
         isGrammarCheckingEnabled = false
         smartInsertDeleteEnabled = false
         drawsBackground = false
+        textColor = Theme.text
+        insertionPointColor = Theme.text
+        selectedTextAttributes = [.backgroundColor: Theme.selection]
         textContainerInset = NSSize(width: 6, height: 8)
         applyFontSize(UserDefaults.standard.object(forKey: DefaultsKey.fontSize) as? CGFloat ?? Self.defaultFontSize)
     }
@@ -49,6 +53,7 @@ final class PlainTextView: NSTextView {
         let font = NSFont.monospacedSystemFont(ofSize: clamped, weight: .regular)
         self.font = font
         typingAttributes[.font] = font
+        typingAttributes[.foregroundColor] = Theme.text
         UserDefaults.standard.set(clamped, forKey: DefaultsKey.fontSize)
     }
 

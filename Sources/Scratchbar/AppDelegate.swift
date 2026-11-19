@@ -7,10 +7,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var panelController: PanelController!
     private(set) var main: MainViewController!
     private let hotKeys = HotKeyCenter()
-    private var shortcutSheet: ShortcutSheet?
-    private var backupsSheet: BackupsSheet?
+    private var settings: SettingsWindowController?
     private(set) var backups: BackupStore!
-    private let locations = StorageLocations(appSupport: AppDelegate.appSupport, iCloudRoot: StorageLocations.defaultICloudRoot)
+    let locations = StorageLocations(appSupport: AppDelegate.appSupport, iCloudRoot: StorageLocations.defaultICloudRoot)
     private(set) var repository: PageRepository!
     private var retryTimer: Timer?
     private var watcher: FolderWatcher?
@@ -39,8 +38,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panelController = PanelController(content: main)
         statusItemController = StatusItemController()
 
-        main.menuProvider = { [unowned self] in SettingsMenu.build(target: self) }
-        statusItemController.menuProvider = { [unowned self] in SettingsMenu.build(target: self) }
+        main.onShowSettings = { [unowned self] in showSettings(nil) }
+        statusItemController.menuProvider = { [unowned self] in statusMenu() }
+        panelController.keepsOpen = { [unowned self] in settings?.window?.isVisible == true }
         statusItemController.onLeftClick = { [unowned self] in panelController.toggle() }
         panelController.didHide = { [unowned self] in backupCurrentPage() }
         panelController.willShow = { [unowned self] in watcher?.scheduleScan() }
@@ -55,7 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self, selector: #selector(didWake(_:)), name: NSWorkspace.didWakeNotification, object: nil)
         retryPendingSync()
         startWatching()
-        main.applyTranslucency(UserDefaults.standard.bool(forKey: DefaultsKey.translucent))
+        UserDefaults.standard.removeObject(forKey: "translucent")  // v0.1 setting, now gone
+        ColorScheme.saved.apply()
         setUpLoginItemOnFirstLaunch()
     }
 
@@ -72,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - Launch at Login and translucency
+    // MARK: - Launch at Login
 
     /// Turn Launch at Login on the first time the app runs from /Applications
     /// (not from a build folder, which would register the wrong copy).
@@ -83,26 +84,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set(true, forKey: DefaultsKey.loginItemSetUp)
     }
 
-    @objc func toggleLaunchAtLogin(_ sender: Any?) {
+    var launchAtLogin: Bool { SMAppService.mainApp.status == .enabled }
+
+    func setLaunchAtLogin(_ on: Bool) {
         do {
-            if SMAppService.mainApp.status == .enabled {
-                try SMAppService.mainApp.unregister()
-            } else {
-                try SMAppService.mainApp.register()
-            }
+            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
             UserDefaults.standard.set(true, forKey: DefaultsKey.loginItemSetUp)
         } catch {
             let alert = NSAlert(error: error)
             alert.messageText = "Couldn't change Launch at Login."
             alert.informativeText = "Move Scratchbar to the Applications folder and try again, or add it in System Settings › General › Login Items."
-            if panelController.isVisible { alert.beginSheetModal(for: panelController.panel) } else { alert.runModal() }
+            present(alert)
         }
     }
 
-    @objc func toggleTranslucency(_ sender: Any?) {
-        let on = !UserDefaults.standard.bool(forKey: DefaultsKey.translucent)
-        UserDefaults.standard.set(on, forKey: DefaultsKey.translucent)
-        main.applyTranslucency(on)
+    /// Shows an alert on the Settings window if it is open, else on the main window.
+    private func present(_ alert: NSAlert) {
+        if let window = settings?.window, window.isVisible {
+            alert.beginSheetModal(for: window)
+        } else if panelController.isVisible {
+            alert.beginSheetModal(for: panelController.panel)
+        } else {
+            alert.runModal()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -123,10 +127,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - iCloud sync
 
-    @objc func toggleSync(_ sender: Any?) {
+    var syncEnabled: Bool { repository.syncEnabled }
+    var syncDegraded: Bool { repository.isDegraded }
+    var iCloudAvailable: Bool { locations.iCloudAvailable }
+
+    func showPagesInFinder() {
+        let folder = repository.primaryFolder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        NSWorkspace.shared.activateFileViewerSelecting([folder])
+    }
+
+    func setSync(_ turningOn: Bool) {
+        guard turningOn != repository.syncEnabled else { return }
         main.flushAll()
         main.leaveCurrentPage()
-        let turningOn = !repository.syncEnabled
         do {
             if turningOn {
                 try SyncMigrator.enable(locations: locations, backups: backups)
@@ -136,7 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             let alert = NSAlert(error: error)
             alert.messageText = turningOn ? "Couldn't turn on iCloud sync." : "Couldn't turn off iCloud sync."
-            if panelController.isVisible { alert.beginSheetModal(for: panelController.panel) } else { alert.runModal() }
+            present(alert)
             return
         }
         UserDefaults.standard.set(turningOn, forKey: DefaultsKey.syncEnabled)
@@ -204,38 +218,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - Settings menu actions
+    // MARK: - Settings window and menus
 
-    @objc func toggleStayOnScreen(_ sender: Any?) {
-        panelController.isPinned.toggle()
+    @objc func showSettings(_ sender: Any?) {
+        if settings == nil {
+            let controller = SettingsWindowController(app: self)
+            controller.onClose = { [weak self] in
+                self?.settings = nil
+                // Give the main window focus back, so clicking elsewhere hides it again.
+                if let panel = self?.panelController, panel.isVisible { panel.panel.makeKey() }
+            }
+            settings = controller
+        }
+        settings?.show()
     }
 
-    /// Items between "Stay on Screen" and "Quit".
-    func addExtraSettings(to menu: NSMenu) {
-        let hotKey = HotKeySettings.load(.standard)
-        let title = "Global Shortcut…" + (hotKey.enabled ? hotKey.combo.map { "  \($0.displayString)" } ?? "" : "")
-        menu.addItem(SettingsMenu.item(title, #selector(showShortcutSheet(_:)), self))
-        let sync = SettingsMenu.item("Sync with iCloud Drive", #selector(toggleSync(_:)), self)
-        sync.state = repository.syncEnabled ? .on : .off
-        if !repository.syncEnabled && !locations.iCloudAvailable {
-            sync.isEnabled = false
-            sync.title = "Sync with iCloud Drive (iCloud Drive is off)"
+    @objc private func newPageFromMenu(_ sender: Any?) {
+        panelController.show(newPage: true)
+    }
+
+    /// Right-click on the menu bar icon.
+    private func statusMenu() -> NSMenu {
+        let menu = NSMenu()
+        func add(_ title: String, _ action: Selector, _ target: AnyObject) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = target
+            menu.addItem(item)
         }
-        menu.addItem(sync)
-        if repository.isDegraded {
-            let status = NSMenuItem(title: "Not syncing — saved on this Mac", action: nil, keyEquivalent: "")
-            status.isEnabled = false
-            status.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)
-            menu.addItem(status)
-        }
-        menu.addItem(SettingsMenu.item("Backups…", #selector(showBackups(_:)), self))
+        add("New Page", #selector(newPageFromMenu(_:)), self)
+        add("Settings…", #selector(showSettings(_:)), self)
         menu.addItem(.separator())
-        let translucent = SettingsMenu.item("Translucent Background", #selector(toggleTranslucency(_:)), self)
-        translucent.state = UserDefaults.standard.bool(forKey: DefaultsKey.translucent) ? .on : .off
-        menu.addItem(translucent)
-        let login = SettingsMenu.item("Launch at Login", #selector(toggleLaunchAtLogin(_:)), self)
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        menu.addItem(login)
+        add("Quit Scratchbar", #selector(NSApplication.terminate(_:)), NSApp)
+        return menu
     }
 
     // MARK: - Backups
@@ -246,17 +260,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         backups.backup(id: id, text: main.currentText, reason: .periodic)
     }
 
-    @objc func showBackups(_ sender: Any?) {
-        if !panelController.isVisible { panelController.show(newPage: false) }
-        let sheet = BackupsSheet(backups: backups) { [unowned self] id, text in
-            if let current = try? main.store.read(id) {
-                backups.backup(id: id, text: current, reason: .beforeRestore)
-            }
-            backups.unmarkDeleted(id: id)
-            main.restorePage(id: id, text: text)
+    /// Settings › Backups › Restore.
+    func restoreBackup(id: String, text: String) {
+        if let current = try? main.store.read(id) {
+            backups.backup(id: id, text: current, reason: .beforeRestore)
         }
-        backupsSheet = sheet
-        sheet.begin(on: panelController.panel)
+        backups.unmarkDeleted(id: id)
+        if !panelController.isVisible { panelController.show(newPage: false) }
+        main.restorePage(id: id, text: text)
     }
 
     // MARK: - Global hotkey
@@ -279,20 +290,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc func showShortcutSheet(_ sender: Any?) {
-        if !panelController.isVisible { panelController.show(newPage: false) }
-        let settings = HotKeySettings.load(.standard)
-        let sheet = ShortcutSheet(
-            enabled: settings.enabled, combo: settings.combo,
-            apply: { [weak self] enabled, combo in
-                HotKeySettings.save(enabled: enabled, combo: combo, to: .standard)
-                return self?.applyHotKeySettings() ?? false
-            },
-            pause: { [weak self] recording in
-                if recording { self?.hotKeys.unregister() } else { self?.applyHotKeySettings() }
-            })
-        shortcutSheet = sheet
-        sheet.begin(on: panelController.panel)
+    /// Saves and registers the shortcut; false if macOS refused it.
+    func applyHotKey(enabled: Bool, combo: KeyCombo?) -> Bool {
+        HotKeySettings.save(enabled: enabled, combo: combo, to: .standard)
+        return applyHotKeySettings()
+    }
+
+    /// Pauses the global shortcut while a new one is being recorded.
+    func pauseHotKey(_ paused: Bool) {
+        if paused { hotKeys.unregister() } else { applyHotKeySettings() }
     }
 
     // MARK: - Main menu (key equivalents only; an accessory app shows no menu bar)
@@ -315,7 +321,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return item
         }
 
-        submenu("Scratchbar", [item("Quit Scratchbar", #selector(NSApplication.terminate(_:)), "q")])
+        submenu("Scratchbar", [
+            item("Settings…", #selector(showSettings(_:)), ",", target: self),
+            item("Quit Scratchbar", #selector(NSApplication.terminate(_:)), "q"),
+        ])
         submenu("Edit", [
             item("Undo", Selector(("undo:")), "z"),
             item("Redo", Selector(("redo:")), "z", [.command, .shift]),

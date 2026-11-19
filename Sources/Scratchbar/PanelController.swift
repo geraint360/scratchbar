@@ -29,6 +29,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     var didHide: () -> Void = {}
     /// Called just before the window shows.
     var willShow: () -> Void = {}
+    /// While true (Settings is open), the window doesn't hide when it loses focus.
+    var keepsOpen: () -> Bool = { false }
 
     private var lastAutoHide = Date.distantPast
     private var isPositioning = false
@@ -61,6 +63,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         panel.contentMinSize = Self.minSize
         panel.contentViewController = content
+        panel.backgroundColor = Theme.editorBackground
         panel.setContentSize(savedSize())
         panel.delegate = self
         panel.onEscape = { [weak self] in
@@ -135,7 +138,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     private func hideIfUnpinnedAndIdle() {
-        guard !isPinned, panel.isVisible, panel.attachedSheet == nil else { return }
+        guard !isPinned, panel.isVisible, panel.attachedSheet == nil, !keepsOpen() else { return }
         lastAutoHide = Date()
         hide()
     }
@@ -184,6 +187,13 @@ final class PanelController: NSObject, NSWindowDelegate {
         return f
     }
 
+    /// Settings › Reset to default size.
+    func resetSize() {
+        UserDefaults.standard.removeObject(forKey: DefaultsKey.panelSize)
+        UserDefaults.standard.removeObject(forKey: DefaultsKey.pinnedFrame)
+        if panel.isVisible { position() } else { panel.setContentSize(Self.defaultSize) }
+    }
+
     private func savedSize() -> NSSize {
         if let s = UserDefaults.standard.string(forKey: DefaultsKey.panelSize) {
             let size = NSSizeFromString(s)
@@ -212,7 +222,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.isPinned, self.panel.isVisible,
                   self.panel.attachedSheet == nil, !self.panel.isKeyWindow,
-                  NSApp.modalWindow == nil else { return }
+                  NSApp.modalWindow == nil, !self.keepsOpen() else { return }
             if let key = NSApp.keyWindow, key.sheetParent === self.panel { return }
             self.lastAutoHide = Date()
             self.hide()
