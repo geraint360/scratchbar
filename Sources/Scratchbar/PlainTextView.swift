@@ -8,7 +8,10 @@ final class PlainTextView: NSTextView {
 
     static func makeScrollable() -> (NSScrollView, PlainTextView) {
         let scroll = NSTextView.scrollableTextView()
-        let textView = PlainTextView(frame: scroll.contentView.bounds)
+        // TextKit 1: its temporary attributes give search highlights that redraw
+        // straight away (TextKit 2's rendering attributes don't, on laid-out text).
+        let textView = PlainTextView(usingTextLayoutManager: false)
+        textView.frame = scroll.contentView.bounds
         textView.autoresizingMask = [.width]
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -62,20 +65,11 @@ final class PlainTextView: NSTextView {
     /// Shades `ranges` (search matches) without changing the text itself, so
     /// nothing is saved, undone or copied with it.
     func highlight(_ ranges: [NSRange]) {
+        guard let layout = layoutManager else { return }
         let length = (string as NSString).length
-        if let layout = textLayoutManager, let content = layout.textContentManager {
-            layout.removeRenderingAttribute(.backgroundColor, for: layout.documentRange)
-            for range in ranges where NSMaxRange(range) <= length {
-                guard let start = content.location(content.documentRange.location, offsetBy: range.location),
-                      let end = content.location(start, offsetBy: range.length),
-                      let textRange = NSTextRange(location: start, end: end) else { continue }
-                layout.addRenderingAttribute(.backgroundColor, value: Theme.match, for: textRange)
-            }
-        } else if let layout = layoutManager {
-            layout.removeTemporaryAttribute(.backgroundColor, forCharacterRange: NSRange(location: 0, length: length))
-            for range in ranges where NSMaxRange(range) <= length {
-                layout.addTemporaryAttribute(.backgroundColor, value: Theme.match, forCharacterRange: range)
-            }
+        layout.removeTemporaryAttribute(.backgroundColor, forCharacterRange: NSRange(location: 0, length: length))
+        for range in ranges where NSMaxRange(range) <= length {
+            layout.addTemporaryAttribute(.backgroundColor, value: Theme.match, forCharacterRange: range)
         }
     }
 

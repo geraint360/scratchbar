@@ -3,9 +3,15 @@
 A tiny menu bar scratchpad for macOS. Plain-text pages that save as you type,
 optional iCloud Drive sync between Macs, and local backups.
 
+<p align="center"><img src="docs/images/main-window.png" alt="Scratchbar's window: a list of pages on the left and the open page's plain text on the right" width="600"></p>
+
+<p align="center"><img src="docs/images/search.png" alt="Searching for “Alice”: the list narrows to matching pages and each match is highlighted in the page" width="600"></p>
+
+<p align="center"><img src="docs/images/settings.png" alt="The Settings window's General tab" width="540"></p>
+
 ## Using it
 
-- **Click the menu bar icon** to open or close the window. **Right-click** it for settings.
+- **Click the menu bar icon** to open or close the window. **Right-click** it for New Page, Settings… and Quit.
 - **⌃⌥⌘N** (changeable) opens a new page from anywhere, ready to type or paste.
   Press it again, or Esc, to close.
 - Pasting always gives plain text. Pages are named from their first line.

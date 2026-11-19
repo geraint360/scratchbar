@@ -14,8 +14,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var retryTimer: Timer?
     private var watcher: FolderWatcher?
 
+    /// `open Scratchbar.app --args -dataFolder /some/folder` uses another folder
+    /// (for demos and testing) without touching your real pages.
     static var appSupport: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        if let override = UserDefaults.standard.string(forKey: "dataFolder"), !override.isEmpty {
+            return URL(fileURLWithPath: (override as NSString).expandingTildeInPath, isDirectory: true)
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Scratchbar", isDirectory: true)
     }
 
