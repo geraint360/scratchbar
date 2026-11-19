@@ -1,7 +1,7 @@
 import AppKit
 
 /// Owns the menu bar icon. Left click toggles the window; right click
-/// (or Control-click) shows the settings menu.
+/// (or Control-click) shows New Page / Settings… / Quit.
 final class StatusItemController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 

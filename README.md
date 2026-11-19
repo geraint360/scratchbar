@@ -9,13 +9,18 @@ optional iCloud Drive sync between Macs, and local backups.
 - **⌃⌥⌘N** (changeable) opens a new page from anywhere, ready to type or paste.
   Press it again, or Esc, to close.
 - Pasting always gives plain text. Pages are named from their first line.
-- **Copy** (⇧⌘C) copies the whole page. **Delete** (⌘⌫) asks first, then moves it to the Trash.
+- **Copy** (the two-sheets icon, top right, or ⇧⌘C) copies the whole page. **Delete** (the ✕ on a
+  sidebar row, or ⌘⌫) asks first, then moves it to the Trash.
 - An empty page is thrown away when you leave it.
 - **Pin** (top right) keeps the window on screen; unpinned it closes when you click elsewhere.
 - ⌘+ / ⌘− / ⌘0 change the text size. ⌘F finds.
 
-Settings (the **…** button or right-click on the icon): Stay on Screen, Global Shortcut…,
-Sync with iCloud Drive, Backups…, Translucent Background, Launch at Login, Quit.
+**Settings** (the cog, ⌘,, or right-click on the icon › Settings…):
+- General: Launch at login, Color scheme (System / Light / Dark), Text size, Stay on screen, Reset to default size.
+- Keyboard: the global shortcut (default ⌃⌥⌘N) and a list of in-app shortcuts.
+- iCloud: Sync with iCloud Drive, sync status, Show in Finder.
+- Backups: browse and restore earlier versions, including deleted pages.
+- About.
 
 ### URL scheme
 

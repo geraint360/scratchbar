@@ -11,10 +11,9 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
     private var scrollView: NSScrollView!
     private(set) var textView: PlainTextView!
     private let countLabel = NSTextField(labelWithString: "")
-    private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
-    private let deleteButton = NSButton(title: "Delete", target: nil, action: nil)
+    private let copyButton = NSButton()
     private let pinButton = NSButton()
-    private let menuButton = NSButton()
+    private let settingsButton = NSButton()
     /// Banners (sync conflicts etc.) are added here above the editor.
     let bannerStack = NSStackView()
 
@@ -25,7 +24,7 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
     /// Hooks provided by the app.
     var isPinned: () -> Bool = { false }
     var onTogglePin: () -> Void = {}
-    var menuProvider: () -> NSMenu = { NSMenu() }
+    var onShowSettings: () -> Void = {}
     /// Called after a page's text has been written (for backups etc.).
     var onSaved: (String, String) -> Void = { _, _ in }
     /// Called just before a page is deleted, with its id and text.
@@ -57,29 +56,26 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
 
     // MARK: - View
 
-    /// Behind everything; visible only with Translucent Background on.
-    private let translucentBackground = NSVisualEffectView()
+    private static func symbol(_ name: String, _ description: String) -> NSImage? {
+        NSImage(systemSymbolName: name, accessibilityDescription: description)?
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
+    }
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 360))
-        translucentBackground.material = .popover
-        translucentBackground.blendingMode = .behindWindow
-        translucentBackground.state = .active
-        translucentBackground.autoresizingMask = [.width, .height]
-        translucentBackground.frame = root.bounds
-        root.addSubview(translucentBackground)
+        let root = ColorView(color: Theme.editorBackground)
+        root.frame = NSRect(x: 0, y: 0, width: 560, height: 360)
 
-        let sidebar = NSVisualEffectView()
-        sidebar.material = .sidebar
-        sidebar.blendingMode = .behindWindow
+        let sidebar = ColorView(color: Theme.sidebarBackground)
         let newButton = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: "New page")!,
                                  target: self, action: #selector(newPage(_:)))
         newButton.title = "New"
         newButton.imagePosition = .imageLeading
         newButton.bezelStyle = .accessoryBarAction
+        newButton.contentTintColor = Theme.secondaryText
         newButton.toolTip = "New page (⌘N)"
 
         list.onSelect = { [weak self] id in self?.selectPage(id: id) }
+        list.onDelete = { [weak self] id in self?.deletePage(id: id) }
 
         let (scroll, tv) = PlainTextView.makeScrollable()
         scrollView = scroll
@@ -87,43 +83,38 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
         tv.delegate = self
 
         countLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        countLabel.textColor = .secondaryLabelColor
+        countLabel.textColor = Theme.secondaryText
 
-        for (button, action, tip) in [(copyButton, #selector(copyPage(_:)), "Copy page (⇧⌘C)"),
-                                      (deleteButton, #selector(deletePage(_:)), "Delete page (⌘⌫)")] {
+        for (button, symbol, label, action, tip) in [
+            (copyButton, "doc.on.doc", "Copy page", #selector(copyPage(_:)), "Copy page (⇧⌘C)"),
+            (pinButton, "pin", "Pin", #selector(togglePin(_:)), ""),
+            (settingsButton, "gearshape", "Settings", #selector(showSettings(_:)), "Settings (⌘,)"),
+        ] {
+            button.image = Self.symbol(symbol, label)
+            button.isBordered = false
+            button.contentTintColor = Theme.secondaryText
             button.target = self
             button.action = action
-            button.bezelStyle = .push
-            button.controlSize = .small
             button.toolTip = tip
+            button.setAccessibilityLabel(label)
         }
-
-        pinButton.bezelStyle = .accessoryBarAction
-        pinButton.isBordered = false
-        pinButton.target = self
-        pinButton.action = #selector(togglePin(_:))
-        menuButton.bezelStyle = .accessoryBarAction
-        menuButton.isBordered = false
-        menuButton.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "Menu")
-        menuButton.target = self
-        menuButton.action = #selector(showMenu(_:))
-        menuButton.toolTip = "Settings"
+        let controls = NSStackView(views: [copyButton, pinButton, settingsButton])
+        controls.spacing = 14
 
         bannerStack.orientation = .vertical
         bannerStack.spacing = 0
 
-        let divider = NSBox()
-        divider.boxType = .separator
+        let divider = ColorView(color: Theme.border)
 
-        for v in [sidebar, newButton, list, divider, bannerStack, scroll, countLabel, copyButton, deleteButton, pinButton, menuButton] as [NSView] {
+        for v in [sidebar, newButton, list, divider, bannerStack, scroll, countLabel, controls] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
         }
         root.addSubview(sidebar)
         sidebar.addSubview(newButton)
         sidebar.addSubview(list)
-        [divider, bannerStack, scroll, countLabel, copyButton, deleteButton, pinButton, menuButton].forEach(root.addSubview)
+        [divider, bannerStack, scroll, countLabel, controls].forEach(root.addSubview)
 
-        let titleBar: CGFloat = 28
+        let titleBar: CGFloat = 32
         NSLayoutConstraint.activate([
             sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: root.topAnchor),
@@ -131,49 +122,35 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
             sidebar.widthAnchor.constraint(equalToConstant: 170),
 
             newButton.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: titleBar),
-            newButton.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 8),
+            newButton.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 10),
 
             list.topAnchor.constraint(equalTo: newButton.bottomAnchor, constant: 6),
             list.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),
             list.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
-            list.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor),
+            list.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -6),
 
             divider.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             divider.topAnchor.constraint(equalTo: root.topAnchor),
             divider.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             divider.widthAnchor.constraint(equalToConstant: 1),
 
-            menuButton.topAnchor.constraint(equalTo: root.topAnchor, constant: 5),
-            menuButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
-            pinButton.centerYAnchor.constraint(equalTo: menuButton.centerYAnchor),
-            pinButton.trailingAnchor.constraint(equalTo: menuButton.leadingAnchor, constant: -6),
+            controls.centerYAnchor.constraint(equalTo: root.topAnchor, constant: titleBar / 2),
+            controls.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
 
             bannerStack.topAnchor.constraint(equalTo: root.topAnchor, constant: titleBar),
             bannerStack.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             bannerStack.trailingAnchor.constraint(equalTo: root.trailingAnchor),
 
             scroll.topAnchor.constraint(equalTo: bannerStack.bottomAnchor),
-            scroll.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
+            scroll.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 4),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: deleteButton.topAnchor, constant: -6),
+            scroll.bottomAnchor.constraint(equalTo: countLabel.topAnchor, constant: -6),
 
-            deleteButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -10),
-            deleteButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -8),
-            copyButton.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: -6),
-            copyButton.centerYAnchor.constraint(equalTo: deleteButton.centerYAnchor),
-            countLabel.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 10),
-            countLabel.centerYAnchor.constraint(equalTo: deleteButton.centerYAnchor),
+            countLabel.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 12),
+            countLabel.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -8),
         ])
         view = root
         refreshPinButton()
-    }
-
-    /// Translucent: the desktop shows through the editor area.
-    func applyTranslucency(_ on: Bool) {
-        _ = view
-        translucentBackground.isHidden = !on
-        view.window?.isOpaque = !on
-        view.window?.backgroundColor = on ? .clear : .windowBackgroundColor
     }
 
     /// Adds a page with `text` (from the URL scheme) and optionally opens it.
@@ -198,9 +175,9 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
 
     func refreshPinButton() {
         let pinned = isPinned()
-        pinButton.image = NSImage(systemSymbolName: pinned ? "pin.fill" : "pin",
-                                  accessibilityDescription: pinned ? "Unpin" : "Pin")
-        pinButton.contentTintColor = pinned ? .controlAccentColor : .secondaryLabelColor
+        pinButton.image = Self.symbol(pinned ? "pin.fill" : "pin", pinned ? "Unpin" : "Pin")
+        pinButton.setAccessibilityLabel(pinned ? "Unpin" : "Pin")
+        pinButton.contentTintColor = pinned ? Theme.accent : Theme.secondaryText
         pinButton.toolTip = pinned ? "Stays on screen — click to close when clicking elsewhere"
                                    : "Closes when you click elsewhere — click to keep on screen"
     }
@@ -566,8 +543,19 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(currentText, forType: .string)
-        copyButton.title = "Copied"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.copyButton.title = "Copy" }
+        copyButton.image = Self.symbol("checkmark", "Copied")
+        copyButton.contentTintColor = Theme.accent
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            self?.copyButton.image = Self.symbol("doc.on.doc", "Copy page")
+            self?.copyButton.contentTintColor = Theme.secondaryText
+        }
+    }
+
+    /// The ✕ on a sidebar row: open that page, then ask as ⌘⌫ does.
+    func deletePage(id: String) {
+        if id != currentID { selectPage(id: id) }
+        guard id == currentID else { return }
+        deletePage(nil)
     }
 
     @objc func deletePage(_ sender: Any?) {
@@ -626,9 +614,8 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
         refreshPinButton()
     }
 
-    @objc private func showMenu(_ sender: NSButton) {
-        let menu = menuProvider()
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+    @objc func showSettings(_ sender: Any?) {
+        onShowSettings()
     }
 
     @objc func biggerText(_ sender: Any?) { textView.applyFontSize(textView.fontSize + 1) }
