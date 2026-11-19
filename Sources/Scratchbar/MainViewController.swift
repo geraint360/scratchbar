@@ -724,7 +724,9 @@ final class MainViewController: NSViewController, NSTextViewDelegate, NSSearchFi
         panel.nameFieldStringValue = exportFileName(for: text)
         panel.allowedContentTypes = [.plainText]
         panel.isExtensionHidden = false
-        if let folder = UserDefaults.standard.url(forKey: DefaultsKey.lastSaveFolder) { panel.directoryURL = folder }
+        // The folder last saved to, or Documents the first time.
+        panel.directoryURL = UserDefaults.standard.url(forKey: DefaultsKey.lastSaveFolder)
+            ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         panel.beginSheetModal(for: window) { response in
             guard response == .OK, let url = panel.url else { return }
             do {
