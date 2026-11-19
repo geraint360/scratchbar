@@ -3,7 +3,7 @@ import ScratchbarCore
 
 /// The window's content: page list, editor, bottom bar and top-right controls.
 /// Owns the page lifecycle: loading, saving, discarding empty pages, copy, delete.
-final class MainViewController: NSViewController, NSTextViewDelegate {
+final class MainViewController: NSViewController, NSTextViewDelegate, NSSearchFieldDelegate {
     var store: PageStoring
     let scheduler: SaveScheduler
 
@@ -14,6 +14,17 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
     private let copyButton = NSButton()
     private let pinButton = NSButton()
     private let settingsButton = NSButton()
+    private let sidebarButton = NSButton()
+    private let newButton = NSButton()
+    private let searchField = NSSearchField()
+    private var sidebarWidth: NSLayoutConstraint!
+    private let divider = ColorView(color: Theme.border)
+    private let dragHandle = DragHandle()
+    /// Pages matching the search field, or nil when not searching.
+    private var searchIDs: Set<String>?
+
+    static let sidebarWidthRange: ClosedRange<CGFloat> = 120...360
+    static let defaultSidebarWidth: CGFloat = 170
     /// Banners (sync conflicts etc.) are added here above the editor.
     let bannerStack = NSStackView()
 
@@ -66,16 +77,19 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
         root.frame = NSRect(x: 0, y: 0, width: 560, height: 360)
 
         let sidebar = ColorView(color: Theme.sidebarBackground)
-        let newButton = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: "New page")!,
-                                 target: self, action: #selector(newPage(_:)))
-        newButton.title = "New"
-        newButton.imagePosition = .imageLeading
-        newButton.bezelStyle = .accessoryBarAction
-        newButton.contentTintColor = Theme.secondaryText
-        newButton.toolTip = "New page (⌘N)"
+        sidebar.clipsToBounds = true
 
         list.onSelect = { [weak self] id in self?.selectPage(id: id) }
         list.onDelete = { [weak self] id in self?.deletePage(id: id) }
+
+        searchField.placeholderString = "Search pages"
+        searchField.controlSize = .small
+        searchField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        searchField.sendsSearchStringImmediately = true
+        searchField.target = self
+        searchField.action = #selector(searchChanged(_:))
+        searchField.delegate = self
+        searchField.toolTip = "Search the text of every page (⇧⌘F)"
 
         let (scroll, tv) = PlainTextView.makeScrollable()
         scrollView = scroll
@@ -84,8 +98,11 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
 
         countLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         countLabel.textColor = Theme.secondaryText
+        countLabel.lineBreakMode = .byTruncatingTail
 
         for (button, symbol, label, action, tip) in [
+            (sidebarButton, "sidebar.left", "Hide page list", #selector(toggleSidebar(_:)), "Show or hide the page list (⌃⌘S)"),
+            (newButton, "plus", "New page", #selector(newPage(_:)), "New page (⌘N)"),
             (copyButton, "doc.on.doc", "Copy page", #selector(copyPage(_:)), "Copy page (⇧⌘C)"),
             (pinButton, "pin", "Pin", #selector(togglePin(_:)), ""),
             (settingsButton, "gearshape", "Settings", #selector(showSettings(_:)), "Settings (⌘,)"),
@@ -98,41 +115,64 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
             button.toolTip = tip
             button.setAccessibilityLabel(label)
         }
+        // Everything for the list and the window on the left; the page's own
+        // controls on the right. All on one row in the title bar.
+        let leftControls = NSStackView(views: [sidebarButton, newButton])
+        leftControls.spacing = 14
         let controls = NSStackView(views: [copyButton, pinButton, settingsButton])
         controls.spacing = 14
 
         bannerStack.orientation = .vertical
         bannerStack.spacing = 0
 
-        let divider = ColorView(color: Theme.border)
+        dragHandle.onDrag = { [weak self] width in self?.setSidebarWidth(width, save: false) }
+        dragHandle.currentWidth = { [weak self] in self?.sidebarWidth.constant ?? 0 }
+        dragHandle.onEnd = { [weak self] in
+            guard let self else { return }
+            UserDefaults.standard.set(Double(sidebarWidth.constant), forKey: DefaultsKey.sidebarWidth)
+        }
 
-        for v in [sidebar, newButton, list, divider, bannerStack, scroll, countLabel, controls] as [NSView] {
+        for v in [sidebar, list, searchField, divider, dragHandle, bannerStack, scroll, countLabel, controls, leftControls] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
         }
         root.addSubview(sidebar)
-        sidebar.addSubview(newButton)
         sidebar.addSubview(list)
-        [divider, bannerStack, scroll, countLabel, controls].forEach(root.addSubview)
+        sidebar.addSubview(searchField)
+        [divider, bannerStack, scroll, countLabel, controls, leftControls, dragHandle].forEach(root.addSubview)
+
+        let saved = UserDefaults.standard.double(forKey: DefaultsKey.sidebarWidth)
+        let width = saved > 0 ? CGFloat(saved) : Self.defaultSidebarWidth
+        let collapsed = UserDefaults.standard.bool(forKey: DefaultsKey.sidebarCollapsed)
+        sidebarWidth = sidebar.widthAnchor.constraint(equalToConstant: collapsed ? 0 : width)
 
         let titleBar: CGFloat = 32
         NSLayoutConstraint.activate([
             sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: root.topAnchor),
             sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            sidebar.widthAnchor.constraint(equalToConstant: 170),
+            sidebarWidth,
 
-            newButton.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: titleBar),
-            newButton.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 10),
+            leftControls.centerYAnchor.constraint(equalTo: root.topAnchor, constant: titleBar / 2),
+            leftControls.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
 
-            list.topAnchor.constraint(equalTo: newButton.bottomAnchor, constant: 6),
+            list.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: titleBar + 2),
             list.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),
             list.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
-            list.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -6),
+            list.bottomAnchor.constraint(equalTo: searchField.topAnchor, constant: -8),
+
+            searchField.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 10),
+            searchField.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -10),
+            searchField.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -8),
 
             divider.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             divider.topAnchor.constraint(equalTo: root.topAnchor),
             divider.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             divider.widthAnchor.constraint(equalToConstant: 1),
+
+            dragHandle.centerXAnchor.constraint(equalTo: divider.centerXAnchor),
+            dragHandle.topAnchor.constraint(equalTo: root.topAnchor, constant: titleBar),
+            dragHandle.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            dragHandle.widthAnchor.constraint(equalToConstant: 8),
 
             controls.centerYAnchor.constraint(equalTo: root.topAnchor, constant: titleBar / 2),
             controls.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
@@ -147,10 +187,95 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
             scroll.bottomAnchor.constraint(equalTo: countLabel.topAnchor, constant: -6),
 
             countLabel.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 12),
+            countLabel.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -12),
             countLabel.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -8),
         ])
         view = root
+        refreshSidebarState()
         refreshPinButton()
+    }
+
+    // MARK: - Sidebar
+
+    private var isSidebarCollapsed: Bool { sidebarWidth.constant == 0 }
+
+    /// Keeps at least 200 pt for the editor.
+    private func setSidebarWidth(_ width: CGFloat, save: Bool) {
+        let maxWidth = min(Self.sidebarWidthRange.upperBound, view.bounds.width - 200)
+        sidebarWidth.constant = min(max(width, Self.sidebarWidthRange.lowerBound), max(maxWidth, Self.sidebarWidthRange.lowerBound))
+        if save { UserDefaults.standard.set(Double(sidebarWidth.constant), forKey: DefaultsKey.sidebarWidth) }
+    }
+
+    @objc func toggleSidebar(_ sender: Any?) {
+        let collapsing = !isSidebarCollapsed
+        if collapsing, view.window?.firstResponder === searchField.currentEditor() { focusEditor() }
+        let saved = UserDefaults.standard.double(forKey: DefaultsKey.sidebarWidth)
+        let target: CGFloat = collapsing ? 0 : (saved > 0 ? CGFloat(saved) : Self.defaultSidebarWidth)
+        UserDefaults.standard.set(collapsing, forKey: DefaultsKey.sidebarCollapsed)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.allowsImplicitAnimation = true
+            sidebarWidth.animator().constant = target
+            view.layoutSubtreeIfNeeded()
+        } completionHandler: { [weak self] in
+            self?.refreshSidebarState()
+        }
+        if !collapsing { refreshSidebarState() }
+    }
+
+    private func refreshSidebarState() {
+        let collapsed = isSidebarCollapsed
+        divider.isHidden = collapsed
+        dragHandle.isHidden = collapsed
+        sidebarButton.setAccessibilityLabel(collapsed ? "Show page list" : "Hide page list")
+    }
+
+    // MARK: - Search
+
+    @objc func focusSearch(_ sender: Any?) {
+        if isSidebarCollapsed { toggleSidebar(nil) }
+        view.window?.makeFirstResponder(searchField)
+    }
+
+    @objc private func searchChanged(_ sender: Any?) {
+        updateSearch()
+        showList(selectedID: currentID)
+        refreshHighlights(scrollToFirst: true)
+    }
+
+    /// While searching, shades every match in the open page (and can scroll
+    /// to the first one); otherwise clears the shading.
+    private func refreshHighlights(scrollToFirst: Bool) {
+        guard let textView else { return }
+        let ranges = searchIDs == nil || !editorHoldsPageText ? [] : matchRanges(of: searchField.stringValue, in: textView.string)
+        textView.highlight(ranges)
+        if scrollToFirst, let first = ranges.first { textView.scrollRangeToVisible(first) }
+    }
+
+    /// Re-runs the search against every page's text (only while searching).
+    private func updateSearch() {
+        searchIDs = matchingPageIDs(query: searchField.stringValue, in: pages) { [unowned self] id in
+            id == currentID && editorHoldsPageText ? textView.string : try? store.read(id)
+        }
+    }
+
+    /// Shows the page list, narrowed to the search results if searching.
+    private func showList(selectedID: String?) {
+        list.show(searchIDs.map { ids in pages.filter { ids.contains($0.id) } } ?? pages, selectedID: selectedID)
+    }
+
+    // MARK: - ⌘[ / ⌘]
+
+    @objc func previousPage(_ sender: Any?) { stepPage(-1) }
+    @objc func nextPage(_ sender: Any?) { stepPage(1) }
+
+    /// Moves through the pages in the order the list shows them.
+    private func stepPage(_ offset: Int) {
+        guard let id = adjacentPageID(in: list.pages.map(\.id), from: currentID, offset: offset) else {
+            NSSound.beep()
+            return
+        }
+        selectPage(id: id)
     }
 
     /// Adds a page with `text` (from the URL scheme) and optionally opens it.
@@ -195,7 +320,8 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
             loaded.insert(unsaved, at: 0)
         }
         pages = loaded
-        list.show(pages, selectedID: currentID)
+        if searchIDs != nil { updateSearch() }
+        showList(selectedID: currentID)
     }
 
     /// Called whenever the window is about to show.
@@ -250,7 +376,8 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
             editorHoldsPageText = false
             setEditorText("Couldn't open this page:\n\(error.localizedDescription)", editable: false)
         }
-        list.show(pages, selectedID: id)
+        refreshHighlights(scrollToFirst: true)
+        showList(selectedID: id)
     }
 
     private func showPageText(_ text: String) {
@@ -286,18 +413,23 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
         if currentID != nil, currentText.isEmpty, textView.isEditable {
             if let id = currentID, let idx = pages.firstIndex(where: { $0.id == id }), idx != 0 {
                 pages.insert(pages.remove(at: idx), at: 0)
-                list.show(pages, selectedID: id)
+                showList(selectedID: id)
             }
             return
         }
         leaveCurrentPage()
+        // A new page wouldn't match the search: clear it so the page shows.
+        if searchIDs != nil {
+            searchField.stringValue = ""
+            searchIDs = nil
+        }
         let id = PageStore.newID()
         pages.insert(Page(id: id, modified: Date(), title: "Empty"), at: 0)
         currentID = id
         UserDefaults.standard.set(id, forKey: DefaultsKey.lastPageID)
         clearBanner()
         showPageText("")
-        list.show(pages, selectedID: id)
+        showList(selectedID: id)
     }
 
     /// Flushes saves and discards the current page if it is empty.
@@ -313,7 +445,7 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
         }
         pages.removeAll { $0.id == id }
         currentID = nil
-        list.show(pages, selectedID: nil)
+        showList(selectedID: nil)
     }
 
     /// Writes `text` as page `id` (restoring a backup) and shows it.
@@ -505,7 +637,7 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
             pages[idx].modified = Date()
             if idx != 0 {
                 pages.insert(pages.remove(at: idx), at: 0)
-                list.show(pages, selectedID: id)
+                showList(selectedID: id)
             } else {
                 list.updateTitle(of: id, to: title)
             }
@@ -526,7 +658,13 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
                 inWord = !isSpace
             }
             let chars = text.count
-            self.countLabel.stringValue = "\(words) \(words == 1 ? "word" : "words") · \(chars) \(chars == 1 ? "character" : "characters")"
+            var parts = ["\(words) \(words == 1 ? "word" : "words")", "\(chars) \(chars == 1 ? "character" : "characters")"]
+            if let id = self.currentID, self.scheduler.knownOnDisk.contains(id) || !text.isEmpty,
+               let modified = self.pages.first(where: { $0.id == id })?.modified {
+                parts.insert("Edited \(editedDescription(modified))", at: 0)
+            }
+            self.countLabel.stringValue = parts.joined(separator: " · ")
+            self.refreshHighlights(scrollToFirst: false)
         }
         countWork = work
         if now { work.perform() } else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work) }
@@ -574,7 +712,17 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
         let delete = alert.addButton(withTitle: "Delete")
         delete.hasDestructiveAction = true
         alert.addButton(withTitle: "Cancel")
+        // ⌘D chooses Delete, as in other Mac apps (Return still does too).
+        let alertWindow = alert.window
+        let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak alertWindow, weak window] event in
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers?.lowercased() == "d",
+                  let alertWindow, alertWindow.isVisible, let window else { return event }
+            window.endSheet(alertWindow, returnCode: .alertFirstButtonReturn)
+            return nil
+        }
         alert.beginSheetModal(for: window) { [weak self] response in
+            if let monitor { NSEvent.removeMonitor(monitor) }
             guard response == .alertFirstButtonReturn else { return }
             self?.performDelete(id: id)
         }
@@ -621,4 +769,44 @@ final class MainViewController: NSViewController, NSTextViewDelegate {
     @objc func biggerText(_ sender: Any?) { textView.applyFontSize(textView.fontSize + 1) }
     @objc func smallerText(_ sender: Any?) { textView.applyFontSize(textView.fontSize - 1) }
     @objc func actualSizeText(_ sender: Any?) { textView.applyFontSize(PlainTextView.defaultFontSize) }
+}
+
+extension MainViewController {
+    /// Return in the search field opens the first match; ↓ moves into the list.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard control === searchField, selector == #selector(NSResponder.insertNewline(_:)) else { return false }
+        if let first = list.pages.first, !list.pages.contains(where: { $0.id == currentID }) {
+            selectPage(id: first.id)
+        }
+        focusEditor()
+        return true
+    }
+}
+
+/// The invisible strip over the sidebar's edge that you drag to resize it.
+final class DragHandle: NSView {
+    var onDrag: (CGFloat) -> Void = { _ in }
+    var onEnd: () -> Void = {}
+    var currentWidth: () -> CGFloat = { 0 }
+    private var start: (x: CGFloat, width: CGFloat)?
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        start = (event.locationInWindow.x, currentWidth())
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start else { return }
+        onDrag(start.width + event.locationInWindow.x - start.x)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        start = nil
+        onEnd()
+    }
 }

@@ -9,6 +9,10 @@ enum Theme {
     static let selection = color(light: 0xe8ddd0, dark: 0x4b4137)
     static let border = color(light: 0xddd5ca, dark: 0x3b3730)
     static let accent = color(light: 0xbc6a3a, dark: 0xd4885a)
+    /// Search matches in the page: the accent colour, lightly.
+    static let match = NSColor(name: nil) { appearance in
+        NSColor(srgbRed: 188 / 255, green: 106 / 255, blue: 58 / 255, alpha: isDark(appearance) ? 0.45 : 0.28)
+    }
     /// rgba(194, 113, 62, 0.08) in the stylesheet.
     static let hover = NSColor(name: nil) { appearance in
         NSColor(srgbRed: 194 / 255, green: 113 / 255, blue: 62 / 255, alpha: isDark(appearance) ? 0.16 : 0.08)
