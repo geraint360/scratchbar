@@ -14,6 +14,11 @@ optional iCloud Drive sync between Macs, and local backups.
 - An empty page is thrown away when you leave it.
 - **Pin** (top right) keeps the window on screen; unpinned it closes when you click elsewhere.
 - ⌘+ / ⌘− / ⌘0 change the text size. ⌘F finds.
+- ⌘[ / ⌘] go to the previous / next page in the list. ⇧⌘F (or the field under the list)
+  searches the text of every page.
+- The page list can be dragged wider or narrower, or hidden with the sidebar button (⌃⌘S).
+- The bottom line shows when the page was last edited, plus its word and character count.
+- In the delete prompt, ⌘D (or Return) deletes.
 
 **Settings** (the cog, ⌘,, or right-click on the icon › Settings…):
 - General: Launch at login, Color scheme (System / Light / Dark), Text size, Stay on screen, Reset to default size.

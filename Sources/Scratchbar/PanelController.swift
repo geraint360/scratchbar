@@ -78,7 +78,12 @@ final class PanelController: NSObject, NSWindowDelegate {
     var isVisible: Bool { panel.isVisible }
 
     func toggle() {
-        if panel.isVisible {
+        if panel.isVisible && isPinned && isCoveredByOtherWindows() {
+            // A pinned window behind other apps' windows: bring it forward.
+            panel.orderFrontRegardless()
+            panel.makeKey()
+            content.focusEditor()
+        } else if panel.isVisible {
             hide()
         } else if Date().timeIntervalSince(lastAutoHide) > 0.3 {
             // A click on the menu bar icon first makes the panel lose focus and
@@ -105,6 +110,24 @@ final class PanelController: NSObject, NSWindowDelegate {
         content.willHide()
         panel.orderOut(nil)
         didHide()
+    }
+
+    /// True if another app's ordinary window overlaps the panel from above.
+    private func isCoveredByOtherWindows() -> Bool {
+        guard let above = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow, .excludeDesktopElements],
+                                                     CGWindowID(panel.windowNumber)) as? [[String: Any]],
+              let primaryHeight = NSScreen.screens.first?.frame.maxY else { return false }
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        return above.contains { info in
+            guard (info[kCGWindowLayer as String] as? Int) == 0,
+                  (info[kCGWindowOwnerPID as String] as? pid_t) != ownPID,
+                  (info[kCGWindowAlpha as String] as? Double ?? 1) > 0,
+                  let dict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: dict) else { return false }
+            // Window-list bounds are top-left based; flip to AppKit's coordinates.
+            let rect = NSRect(x: bounds.minX, y: primaryHeight - bounds.maxY, width: bounds.width, height: bounds.height)
+            return rect.intersects(panel.frame)
+        }
     }
 
     // MARK: - Hiding when you go elsewhere (unpinned)

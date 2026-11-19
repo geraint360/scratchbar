@@ -9,5 +9,7 @@ enum DefaultsKey {
     static let lastPageID = "lastPageID"
     static let syncEnabled = "syncEnabled"
     static let colorScheme = "colorScheme"
+    static let sidebarWidth = "sidebarWidth"
+    static let sidebarCollapsed = "sidebarCollapsed"
     static let loginItemSetUp = "loginItemSetUp"
 }
